@@ -5,7 +5,7 @@
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { showToast } from 'vant';
-import { getWecomAuthorizeUrl, sendPhoneCode } from '../api';
+import { getWecomAuthorizeUrl } from '../api';
 import { isAuthenticated } from '../api/http';
 import { useAuthStore } from '../stores/auth';
 import { EVENT_NAMES, track } from '../analytics';
@@ -15,8 +15,8 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 
-/** 联调/开发放行手机号（真实环境用企微；企微不可用时后端仍可用手机号验证码登录，验证码固定 123456） */
-const DEV_PHONE = import.meta.env.VITE_DEV_PHONE ?? '13900139010';
+const WECOM_STATE_KEY = 'wecom-oauth-state';
+const WECOM_REDIRECT_KEY = 'wecom-oauth-redirect';
 
 const wecomSubmitting = ref(false);
 async function wecomLogin() {
@@ -25,38 +25,49 @@ async function wecomLogin() {
   track(EVENT_NAMES.LOGIN_METHOD_SELECTED, { properties: { method: 'wecom' } });
   try {
     // 真实模式：跳转企微 OAuth 授权页；mock 模式：模拟回调后直接登录
-    const { authorizeUrl } = await getWecomAuthorizeUrl();
+    const { authorizeUrl, state } = await getWecomAuthorizeUrl();
     const isMock = authorizeUrl.includes('wecom=mock');
     if (isMock) {
-      await auth.loginWithWecom('mock-code', 'mock-state');
+      await auth.loginWithWecom('mock-code', state);
       showToast('登录成功');
       await redirectAfterLogin();
     } else {
+      sessionStorage.setItem(WECOM_STATE_KEY, state);
+      sessionStorage.setItem(WECOM_REDIRECT_KEY, safeInternalRedirect(route.query.redirect));
       location.href = authorizeUrl;
     }
-  } catch {
-    // 企微不可用（联调/未接入）：默认放行——用开发账号走手机号接口建立真实会话
-    await devPassLogin();
+  } catch (error) {
+    showToast(errorMessage(error, '企业微信授权暂不可用，请稍后重试'));
   } finally {
     wecomSubmitting.value = false;
   }
 }
 
-/** 企微不可用时的默认放行：发送验证码并用开发手机号登录（后端验证码固定 123456） */
-async function devPassLogin() {
+function safeInternalRedirect(value: unknown): string {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\\\')) return '/feed';
   try {
-    await sendPhoneCode(DEV_PHONE);
-    await auth.login(DEV_PHONE, '123456');
-    showToast('已放行登录（开发账号）');
-    await redirectAfterLogin();
+    const target = new URL(value, window.location.origin);
+    return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : '/feed';
   } catch {
-    showToast('登录服务暂不可用，请稍后重试');
+    return '/feed';
   }
 }
 
 async function redirectAfterLogin() {
-  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/feed';
+  const redirect = safeInternalRedirect(sessionStorage.getItem(WECOM_REDIRECT_KEY) ?? route.query.redirect);
+  sessionStorage.removeItem(WECOM_REDIRECT_KEY);
   await router.replace(redirect);
+}
+
+function clearCallbackQuery() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('code');
+  url.searchParams.delete('state');
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 // 企微 OAuth 回调返回本页（?code=..&state=..）时完成登录
@@ -64,11 +75,18 @@ onMounted(async () => {
   const code = typeof route.query.code === 'string' ? route.query.code : null;
   const state = typeof route.query.state === 'string' ? route.query.state : null;
   if (code && state && isAuthenticated() === false) {
+    clearCallbackQuery();
+    const expectedState = sessionStorage.getItem(WECOM_STATE_KEY);
+    sessionStorage.removeItem(WECOM_STATE_KEY);
+    if (state !== expectedState) {
+      showToast('授权状态无效或已过期，请重新登录');
+      return;
+    }
     try {
       await auth.loginWithWecom(code, state);
       await redirectAfterLogin();
-    } catch {
-      showToast('企微登录失败');
+    } catch (error) {
+      showToast(errorMessage(error, '企微登录失败，请重新授权'));
     }
   }
 });

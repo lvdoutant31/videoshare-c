@@ -2,11 +2,10 @@
 /**
  * 收藏/点赞/历史 视频列表页（§2.3 favorites/likes、§2.5 history）。
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { showConfirmDialog, showToast } from 'vant';
-import { clearHistory as apiClearHistory, getHistory } from '../api';
-import { mockFeed } from '../api/mock/data';
+import { clearHistory as apiClearHistory, getFavoriteVideos, getHistory, getLikedVideos } from '../api';
 import type { FeedItem, HistoryItem } from '../api/types';
 import { formatCount, formatDateTime } from '../utils/format';
 
@@ -14,21 +13,30 @@ const props = defineProps<{ kind: 'favorites' | 'likes' | 'history' }>();
 const router = useRouter();
 
 const items = ref<(FeedItem | HistoryItem)[]>([]);
+const loading = ref(false);
+const loadFailed = ref(false);
 const title = computed(() => ({ favorites: '我的收藏', likes: '我的点赞', history: '观看历史' })[props.kind]);
 
-onMounted(async () => {
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  if (props.kind === 'history') {
-    try {
-      const page = await getHistory();
-      items.value = page.items;
-      return;
-    } catch {
-      /* fallthrough 到空态 */
-    }
+async function loadItems() {
+  loading.value = true;
+  loadFailed.value = false;
+  try {
+    const page = props.kind === 'history'
+      ? await getHistory()
+      : props.kind === 'favorites'
+        ? await getFavoriteVideos()
+        : await getLikedVideos();
+    items.value = page.items;
+  } catch {
+    items.value = [];
+    loadFailed.value = true;
+    showToast('加载失败，请稍后重试');
+  } finally {
+    loading.value = false;
   }
-  items.value = props.kind === 'favorites' ? mockFeed.filter((v) => v.viewerState.favorited) : mockFeed.filter((v) => v.viewerState.liked);
-});
+}
+
+watch(() => props.kind, loadItems, { immediate: true });
 
 function videoOf(item: FeedItem | HistoryItem): FeedItem {
   return 'video' in item ? item.video : item;
@@ -64,7 +72,8 @@ async function clearHistory() {
       <button v-else aria-label="更多"><van-icon name="ellipsis" /></button>
     </header>
     <div class="profile-scroll">
-      <div v-if="items.length" class="video-list">
+      <div v-if="loading" class="empty-state"><van-loading size="28" /></div>
+      <div v-else-if="items.length" class="video-list">
         <article v-for="item in items" :key="videoOf(item).id" class="video-list-item" @click="open(item)">
           <div class="thumb">
             <img :src="videoOf(item).cover?.coverUrl ?? ''" alt="封面" />
@@ -81,7 +90,8 @@ async function clearHistory() {
       </div>
       <div v-else class="empty-state">
         <van-icon :name="kind === 'history' ? 'clock-o' : kind === 'favorites' ? 'star-o' : 'like-o'" />
-        <p>{{ kind === 'history' ? '暂无观看历史' : kind === 'favorites' ? '还没有收藏的视频' : '还没有点赞的视频' }}</p>
+        <p v-if="loadFailed">加载失败，稍后再试</p>
+        <p v-else>{{ kind === 'history' ? '暂无观看历史' : kind === 'favorites' ? '还没有收藏的视频' : '还没有点赞的视频' }}</p>
       </div>
     </div>
   </div>

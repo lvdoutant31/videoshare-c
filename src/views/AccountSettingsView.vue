@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * 账号设置页（PRD 手机端 §1）：资料编辑、企微绑定管理、协议同意、账号注销申请。
+ * 账号设置页（PRD 手机端 §1）：资料编辑、企微身份状态、协议同意、账号注销申请。
  */
 import { onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { showConfirmDialog, showToast } from 'vant';
-import { acceptAgreement, getAgreements, requestCancellation, unbindWecom, updateMe } from '../api';
+import { acceptAgreement, getAgreements, requestCancellation } from '../api';
 import { useAuthStore } from '../stores/auth';
 import type { AgreementInfo } from '../api/types';
 
@@ -15,13 +15,11 @@ const auth = useAuthStore();
 const draft = reactive({ nickname: '', bio: '' });
 const saving = ref(false);
 const agreements = ref<AgreementInfo[]>([]);
-const wecomBound = ref(false);
 
 onMounted(() => {
   if (auth.user) {
     draft.nickname = auth.user.nickname;
     draft.bio = auth.user.bio ?? '';
-    wecomBound.value = auth.user.wecomBound;
   }
   getAgreements()
     .then((list) => {
@@ -44,26 +42,6 @@ async function saveProfile() {
     showToast(error instanceof Error ? error.message : '保存失败');
   } finally {
     saving.value = false;
-  }
-}
-
-async function unbind() {
-  if (!wecomBound.value) return;
-  try {
-    await showConfirmDialog({
-      title: '解绑企业微信',
-      message: '解绑前请确保仍保留手机号登录方式，确定继续吗？',
-    });
-  } catch {
-    return;
-  }
-  try {
-    await unbindWecom();
-    wecomBound.value = false;
-    if (auth.user) auth.user = { ...auth.user, wecomBound: false };
-    showToast('已解绑企微身份');
-  } catch {
-    showToast('解绑失败');
   }
 }
 
@@ -121,11 +99,10 @@ async function cancelAccount() {
       </section>
 
       <section class="settings-section">
-        <h3>企业微信绑定</h3>
+        <h3>登录方式</h3>
         <div class="field-row static">
-          <span>已绑定企业微信</span>
-          <button v-if="wecomBound" class="danger-text" @click="unbind">解绑</button>
-          <small v-else>未绑定</small>
+          <span>企业微信</span>
+          <small>{{ auth.user?.wecomBound ? '唯一登录方式 · 已绑定' : '身份状态异常' }}</small>
         </div>
       </section>
 
@@ -161,7 +138,6 @@ async function cancelAccount() {
 .field-row.static small { color: #9a9ba0; font-size: 12px; }
 .primary-btn { width: 100%; height: 42px; margin-top: 14px; border-radius: 21px; color: #fff; background: var(--indigo); font-size: 14px; }
 .primary-btn:disabled { opacity: .5; }
-.danger-text { color: #d43c3c; font-size: 13px; }
 .link-btn { color: var(--indigo); font-size: 13px; }
 .danger-zone { margin-bottom: 24px; }
 .danger-btn { width: 100%; height: 44px; margin-top: 8px; border-radius: 8px; color: #d43c3c; background: #fdecec; font-size: 14px; }

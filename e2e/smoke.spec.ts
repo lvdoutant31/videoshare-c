@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 /**
  * 移动端核心链路冒烟（基线二验收）：
  * 1. 推荐流加载与首视频渲染
- * 2. 手机号登录（mock 验证码 123456）并回到原页面
+ * 2. 企业微信 mock 授权并回到原页面
  * 3. 上下滑切换视频（单实例播放）
  * 4. 点赞乐观更新与失败回滚（服务端 mock 权威值）
  * 5. 评论面板打开/关闭
@@ -16,11 +16,9 @@ test('推荐流加载并渲染视频', async ({ page }) => {
   await expect(page.locator('.feed-meta').first()).toBeVisible();
 });
 
-test('手机号登录后跳转回推荐流', async ({ page }) => {
+test('企业微信授权后跳转回推荐流', async ({ page }) => {
   await page.goto('login');
-  await page.getByPlaceholder('请输入手机号').fill('13800138000');
-  await page.getByPlaceholder('验证码').fill('123456');
-  await page.getByRole('button', { name: '登录 / 注册' }).click();
+  await page.getByRole('button', { name: '使用企业微信登录' }).click();
   await expect(page).toHaveURL(/\/feed/);
   // 登录态持久化：重新进入推荐流仍保持
   await page.goto('feed');
@@ -31,9 +29,7 @@ test('未登录点赞被引导登录并可回跳', async ({ page }) => {
   await page.goto('feed');
   await page.locator('.action-item').nth(0).click();
   await expect(page).toHaveURL(/\/login/);
-  await page.getByPlaceholder('请输入手机号').fill('13800138000');
-  await page.getByPlaceholder('验证码').fill('123456');
-  await page.getByRole('button', { name: '登录 / 注册' }).click();
+  await page.getByRole('button', { name: '使用企业微信登录' }).click();
   await expect(page).toHaveURL(/\/feed/);
 });
 
@@ -55,21 +51,18 @@ test('上下滑动切换视频', async ({ page }) => {
   expect(afterPrev).not.toBe(afterNext);
 });
 
-test('点赞乐观更新：状态点亮且计数变化', async ({ page }) => {
-  // 直接注入登录态（mock token）
-  await page.addInitScript(() => localStorage.setItem('yingliu.app.token', 'mock-access-token'));
-  await page.goto('feed');
+test('点赞操作切换当前状态', async ({ page }) => {
+  await loginWithWecomMock(page);
 
   const likeButton = page.locator('.action-item').nth(0);
   await expect(likeButton).toBeVisible();
+  const wasLiked = (await likeButton.locator('.liked').count()) > 0;
   await likeButton.click();
-  // 乐观更新：点赞图标点亮
-  await expect(likeButton.locator('.van-icon-like')).toBeVisible({ timeout: 5000 });
+  await expect(likeButton.locator('.liked')).toHaveCount(wasLiked ? 0 : 1);
 });
 
 test('评论面板打开与关闭', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('yingliu.app.token', 'mock-access-token'));
-  await page.goto('feed');
+  await loginWithWecomMock(page);
 
   await page.locator('.action-item').nth(1).click();
   await expect(page.locator('.comments-sheet')).toBeVisible();
@@ -77,6 +70,12 @@ test('评论面板打开与关闭', async ({ page }) => {
   await page.locator('.comments-header button[aria-label="关闭评论"]').click();
   await expect(page.locator('.comments-sheet')).toBeHidden();
 });
+
+async function loginWithWecomMock(page: import('@playwright/test').Page) {
+  await page.goto('login');
+  await page.getByRole('button', { name: '使用企业微信登录' }).click();
+  await expect(page).toHaveURL(/\/feed/);
+}
 
 /** 通过 TouchEvent 模拟垂直滑动（组件监听 touch* 事件） */
 async function swipe(page: import('@playwright/test').Page, deltaY: number) {

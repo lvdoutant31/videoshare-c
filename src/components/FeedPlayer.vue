@@ -27,6 +27,7 @@ const buffering = ref(false);
 const progress = ref(0); // 0..1
 const rate = ref(1);
 const showPausedHint = ref(false);
+const ended = ref(false);
 
 const MUTE_KEY = 'yingliu.muted';
 const mutedPref = ref(localStorage.getItem(MUTE_KEY) !== '0');
@@ -44,6 +45,13 @@ function persistMuted() {
 async function play() {
   const video = videoEl.value;
   if (!video || !videoUrl.value || failed.value) return;
+  if (ended.value || (Number.isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration - 0.05)) {
+    video.currentTime = 0;
+    progress.value = 0;
+    completeReported = false;
+  }
+  ended.value = false;
+  showPausedHint.value = false;
   video.muted = mutedPref.value;
   try {
     await video.play();
@@ -88,6 +96,8 @@ watch(
     failed.value = false;
     retryCount = 0;
     progress.value = 0;
+    ended.value = false;
+    showPausedHint.value = false;
     effectiveReported = false;
     completeReported = false;
     lastProgressReport = 0;
@@ -107,21 +117,29 @@ function toggle() {
 
 // 长按倍速
 let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let longPressActivated = false;
+let lastLongPressAt = 0;
 function onPressStart() {
+  longPressActivated = false;
   longPressTimer = setTimeout(() => {
     const video = videoEl.value;
     if (!video || video.paused) return;
+    longPressActivated = true;
     rate.value = 2;
     video.playbackRate = 2;
   }, 500);
 }
-function onPressEnd() {
+function onPressEnd(): boolean {
   if (longPressTimer) clearTimeout(longPressTimer);
   longPressTimer = null;
+  const activated = longPressActivated;
+  longPressActivated = false;
+  if (activated) lastLongPressAt = Date.now();
   if (rate.value !== 1) {
     rate.value = 1;
     if (videoEl.value) videoEl.value.playbackRate = 1;
   }
+  return activated;
 }
 
 function onError() {
@@ -182,21 +200,98 @@ function onWaiting() {
 }
 function onPlaying() {
   buffering.value = false;
+  paused.value = false;
+  ended.value = false;
+}
+function onNativePause() {
+  paused.value = true;
+}
+function onEnded() {
+  buffering.value = false;
+  paused.value = true;
+  ended.value = true;
+  progress.value = 1;
+  showPausedHint.value = true;
 }
 
 // 单击暂停 / 双击点赞
+const DOUBLE_TAP_WINDOW_MS = 300;
+const SINGLE_TAP_DELAY_MS = 320;
 let lastTap = 0;
 let tapTimer: ReturnType<typeof setTimeout> | null = null;
 function onTap() {
   const now = Date.now();
-  if (now - lastTap < 300) {
+  if (now - lastTap < DOUBLE_TAP_WINDOW_MS) {
     if (tapTimer) clearTimeout(tapTimer);
     lastTap = 0;
     emit('like-double-tap', props.item);
     return;
   }
   lastTap = now;
-  tapTimer = setTimeout(() => toggle(), 260);
+  tapTimer = setTimeout(() => toggle(), SINGLE_TAP_DELAY_MS);
+}
+
+let surfacePointerId: number | null = null;
+let surfaceStartX = 0;
+let surfaceStartY = 0;
+let surfaceMoved = false;
+let touchStartX = 0;
+let touchStartY = 0;
+let touchMoved = false;
+let lastTouchTapAt = 0;
+let suppressSurfaceClickUntil = 0;
+
+function onSurfacePointerDown(event: PointerEvent) {
+  if (surfacePointerId !== null || event.isPrimary === false) return;
+  surfacePointerId = event.pointerId;
+  surfaceStartX = event.clientX;
+  surfaceStartY = event.clientY;
+  surfaceMoved = false;
+  onPressStart();
+}
+function onSurfacePointerMove(event: PointerEvent) {
+  if (event.pointerId !== surfacePointerId) return;
+  if (Math.hypot(event.clientX - surfaceStartX, event.clientY - surfaceStartY) > 12) {
+    surfaceMoved = true;
+    onPressEnd();
+  }
+}
+function finishSurfacePointer(event: PointerEvent) {
+  if (event.pointerId !== surfacePointerId) return;
+  surfacePointerId = null;
+  const wasLongPress = onPressEnd();
+  if (surfaceMoved || wasLongPress) suppressSurfaceClickUntil = Date.now() + 500;
+}
+function onSurfacePointerUp(event: PointerEvent) {
+  finishSurfacePointer(event);
+}
+function onSurfacePointerCancel(event: PointerEvent) {
+  finishSurfacePointer(event);
+}
+function onSurfaceTouchStart(event: TouchEvent) {
+  if (event.touches.length !== 1) return;
+  touchStartX = event.touches[0].clientX;
+  touchStartY = event.touches[0].clientY;
+  touchMoved = false;
+}
+function onSurfaceTouchMove(event: TouchEvent) {
+  if (event.touches.length !== 1) return;
+  if (Math.hypot(event.touches[0].clientX - touchStartX, event.touches[0].clientY - touchStartY) > 12) {
+    touchMoved = true;
+  }
+}
+function onSurfaceTouchEnd() {
+  lastTouchTapAt = Date.now();
+  if (touchMoved || Date.now() - lastLongPressAt < 500) {
+    suppressSurfaceClickUntil = Date.now() + 500;
+    return;
+  }
+  onTap();
+}
+function onSurfaceClick() {
+  // 触摸路径已在 touchend 处理，忽略其随后生成的兼容 click。
+  if (Date.now() - lastTouchTapAt < 500 || Date.now() < suppressSurfaceClickUntil) return;
+  onTap();
 }
 
 onMounted(() => {
@@ -217,28 +312,39 @@ function onVisibilityChange() {
 
 // 拖动进度条 seek（touch + mouse 兼容）
 const progressBarEl = ref<HTMLDivElement | null>(null);
-let seeking = false;
+const seeking = ref(false);
+let seekPointerId: number | null = null;
 
 function seekTo(clientX: number) {
   const bar = progressBarEl.value;
   const video = videoEl.value;
   if (!bar || !video || !video.duration || failed.value) return;
   const rect = bar.getBoundingClientRect();
+  if (rect.width <= 0) return;
   const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
   video.currentTime = ratio * video.duration;
   progress.value = ratio;
+  if (ratio < 0.999) {
+    ended.value = false;
+    completeReported = false;
+  }
 }
-function onSeekStart(event: TouchEvent | MouseEvent) {
-  if (failed.value) return;
-  seeking = true;
-  seekTo('touches' in event ? event.touches[0].clientX : event.clientX);
+function onSeekStart(event: PointerEvent) {
+  if (failed.value || event.isPrimary === false) return;
+  seekPointerId = event.pointerId;
+  seeking.value = true;
+  progressBarEl.value?.setPointerCapture?.(event.pointerId);
+  seekTo(event.clientX);
 }
-function onSeekMove(event: TouchEvent | MouseEvent) {
-  if (!seeking) return;
-  seekTo('touches' in event ? event.touches[0].clientX : event.clientX);
+function onSeekMove(event: PointerEvent) {
+  if (!seeking.value || event.pointerId !== seekPointerId) return;
+  seekTo(event.clientX);
 }
-function onSeekEnd() {
-  seeking = false;
+function onSeekEnd(event: PointerEvent) {
+  if (event.pointerId !== seekPointerId) return;
+  progressBarEl.value?.releasePointerCapture?.(event.pointerId);
+  seekPointerId = null;
+  seeking.value = false;
 }
 
 // 供父组件（评论面板打开等场景）控制播放
@@ -256,16 +362,33 @@ defineExpose({ play, pause, toggle });
       playsinline
       webkit-playsinline
       x5-playsinline
-      loop
       :muted="mutedPref"
       @error="onError"
       @timeupdate="onTimeUpdate"
       @waiting="onWaiting"
       @playing="onPlaying"
+      @pause="onNativePause"
+      @ended="onEnded"
     />
     <div class="feed-shade" />
-    <div class="player-hint" v-if="showPausedHint && !failed" @click="toggle">
-      <van-icon name="play" />
+    <div
+      class="player-hit-area"
+      role="button"
+      :tabindex="active ? 0 : -1"
+      :aria-label="ended ? '重新播放' : paused ? '播放视频' : '暂停视频'"
+      @pointerdown="onSurfacePointerDown"
+      @pointermove="onSurfacePointerMove"
+      @pointerup="onSurfacePointerUp"
+      @pointercancel="onSurfacePointerCancel"
+      @touchstart="onSurfaceTouchStart"
+      @touchmove="onSurfaceTouchMove"
+      @touchend="onSurfaceTouchEnd"
+      @click="onSurfaceClick"
+      @keydown.enter.prevent="toggle"
+      @keydown.space.prevent="toggle"
+    />
+    <div class="player-hint" v-if="(showPausedHint || ended) && !failed">
+      <van-icon :name="ended ? 'replay' : 'play'" />
     </div>
     <div class="player-hint failed" v-else-if="failed">
       <van-icon name="replay" />
@@ -318,14 +441,10 @@ defineExpose({ play, pause, toggle });
       ref="progressBarEl"
       class="flow-progress"
       :class="{ seeking }"
-      @touchstart.passive="onSeekStart"
-      @touchmove.passive="onSeekMove"
-      @touchend.passive="onSeekEnd"
-      @touchcancel.passive="onSeekEnd"
-      @mousedown="onSeekStart"
-      @mousemove="onSeekMove"
-      @mouseup="onSeekEnd"
-      @mouseleave="onSeekEnd"
+      @pointerdown.stop.prevent="onSeekStart"
+      @pointermove.stop.prevent="onSeekMove"
+      @pointerup.stop.prevent="onSeekEnd"
+      @pointercancel.stop.prevent="onSeekEnd"
     ><i :style="{ transform: `scaleX(${progress})` }" /></div>
     <span class="feed-duration">{{ durationLabel }}</span>
     <span class="feed-rate" v-if="rate === 2">2x 倍速</span>
@@ -334,10 +453,13 @@ defineExpose({ play, pause, toggle });
 
 <style scoped>
 .feed-item { position: relative; flex: 0 0 100%; width: 100%; height: 100%; }
+.player-hit-area { position: absolute; z-index: 2; inset: 0; touch-action: none; cursor: pointer; }
+.player-hit-area:focus-visible { outline: 2px solid var(--cyan); outline-offset: -4px; }
+.player-hint { z-index: 4; }
 .feed-duration { position: absolute; z-index: 9; right: 14px; bottom: 92px; padding: 2px 8px; border-radius: 10px; color: #fff; background: #0006; font-size: 11px; pointer-events: none; }
 .feed-rate { position: absolute; z-index: 9; left: 50%; top: 120px; transform: translateX(-50%); padding: 4px 12px; border-radius: 14px; color: var(--cyan); background: #0009; font-size: 12px; pointer-events: none; }
 .feed-buffering { position: absolute; z-index: 9; top: 50%; left: 50%; transform: translate(-50%, -50%); }
-.flow-progress { position: absolute; z-index: 9; left: 0; right: 0; bottom: 86px; height: 14px; background: transparent; pointer-events: auto; display: flex; align-items: center; cursor: pointer; }
+.flow-progress { position: absolute; z-index: 9; left: 0; right: 0; bottom: 86px; height: 14px; background: transparent; pointer-events: auto; display: flex; align-items: center; cursor: pointer; touch-action: none; }
 .flow-progress::before { content: ""; position: absolute; left: 0; right: 0; height: 2px; border-radius: 2px; background: #ffffff33; }
 .flow-progress i { position: absolute; left: 0; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--cyan), var(--coral)); transform-origin: left; }
 .flow-progress.seeking::before { height: 4px; }

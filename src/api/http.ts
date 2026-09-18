@@ -67,6 +67,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal,
+    credentials: 'include',
   });
 
   let payload: ApiResponse<unknown> | null = null;

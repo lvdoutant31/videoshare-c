@@ -2,6 +2,7 @@
  * 评论与回复 API（§2.4）。
  */
 import { request } from './http';
+import { createUuid } from '../utils/uuid';
 import { USE_MOCK, delay, paginate } from './mock';
 import { mockCommentsFor } from './mock/data';
 import type { CommentItem, CommentSort, CursorPage, PublishCommentResult } from './types';
@@ -46,7 +47,7 @@ export function setCommentLike(commentId: string, active: boolean): Promise<{ ac
   if (USE_MOCK) {
     return delay(150).then(() => ({ active, count: 84 + (active ? 1 : -1) }));
   }
-  return request(`/app/comments/${commentId}/like`, { method: 'PUT', body: { active }, idempotencyKey: crypto.randomUUID() });
+  return request(`/app/comments/${commentId}/like`, { method: 'PUT', body: { active }, idempotencyKey: createUuid() });
 }
 
 /** 删除本人评论 */

@@ -6,7 +6,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { showToast } from 'vant';
-import { addHistory, getRecommendFeed, setFavorite, setFollow, setLike } from '../api';
+import { addHistory, getFollowingFeed, getRecommendFeed, setFavorite, setFollow, setLike } from '../api';
 import { isAuthenticated } from '../api/http';
 import type { FeedItem } from '../api/types';
 import FeedPlayer from '../components/FeedPlayer.vue';
@@ -26,6 +26,8 @@ const loading = ref(false);
 const initialLoading = ref(true);
 const finished = ref(false);
 const loadFailed = ref(false);
+const endReached = ref(false);
+const feedMode = ref<'following' | 'recommend'>('recommend');
 
 const activeIndex = ref(0);
 const commentsOpen = ref(false);
@@ -36,6 +38,10 @@ const shareVideo = ref<FeedItem | null>(null);
 const reportVideoItem = ref<FeedItem | null>(null);
 
 const activeItem = computed(() => videos.value[activeIndex.value]);
+const showEndHint = computed(() =>
+  endReached.value && finished.value && videos.value.length > 0
+  && activeIndex.value === videos.value.length - 1,
+);
 
 // 曝光埋点：当前项变化时上报（仅一次/项）
 const exposed = new Set<string>();
@@ -58,12 +64,16 @@ async function loadMore(reset = false) {
   loading.value = true;
   loadFailed.value = false;
   try {
-    const page = await getRecommendFeed(reset ? null : cursor.value, 5);
+    const page = feedMode.value === 'following'
+      ? await getFollowingFeed(reset ? null : cursor.value, 5)
+      : await getRecommendFeed(reset ? null : cursor.value, 5);
     if (reset) {
       videos.value = page.items;
       activeIndex.value = 0;
+      endReached.value = false;
     } else {
-      videos.value.push(...page.items);
+      const existingIds = new Set(videos.value.map((item) => item.id));
+      videos.value.push(...page.items.filter((item) => !existingIds.has(item.id)));
     }
     cursor.value = page.nextCursor;
     finished.value = page.nextCursor == null;
@@ -77,41 +87,79 @@ async function loadMore(reset = false) {
 }
 
 // ---------- 滑动切换 ----------
+const SWIPE_DISTANCE = 60;
+const SWIPE_DIRECTION_RATIO = 1.2;
+let pointerId: number | null = null;
+let startX = 0;
 let startY = 0;
+let deltaX = 0;
 let deltaY = 0;
-let tracking = false;
 
-function onTouchStart(e: TouchEvent) {
-  if (e.touches.length !== 1) return;
-  tracking = true;
-  startY = e.touches[0].clientY;
+function isInteractiveTarget(target: EventTarget | null) {
+  return target instanceof Element
+    && Boolean(target.closest('button, a, input, textarea, select, .flow-progress'));
+}
+
+function onPointerDown(event: PointerEvent) {
+  if (pointerId !== null || event.isPrimary === false || isInteractiveTarget(event.target)) return;
+  pointerId = event.pointerId;
+  startX = event.clientX;
+  startY = event.clientY;
+  deltaX = 0;
   deltaY = 0;
 }
-function onTouchMove(e: TouchEvent) {
-  if (!tracking) return;
-  deltaY = e.touches[0].clientY - startY;
+function onPointerMove(event: PointerEvent) {
+  if (event.pointerId !== pointerId) return;
+  deltaX = event.clientX - startX;
+  deltaY = event.clientY - startY;
 }
-function onTouchEnd() {
-  if (!tracking) return;
-  tracking = false;
-  if (deltaY < -60) next();
-  else if (deltaY > 60) prev();
+function finishPointer(event: PointerEvent, cancelled = false) {
+  if (event.pointerId !== pointerId) return;
+  pointerId = null;
+  if (cancelled || Math.abs(deltaY) < SWIPE_DISTANCE) return;
+  if (Math.abs(deltaY) < Math.abs(deltaX) * SWIPE_DIRECTION_RATIO) return;
+  if (deltaY < 0) void next();
+  else prev();
+}
+function onPointerUp(event: PointerEvent) {
+  finishPointer(event);
+}
+function onPointerCancel(event: PointerEvent) {
+  finishPointer(event, true);
 }
 
-function next() {
-  if (activeIndex.value >= videos.value.length - 1) {
-    if (!finished.value) loadMore();
+async function next() {
+  if (activeIndex.value < videos.value.length - 1) {
+    activeIndex.value += 1;
+    endReached.value = false;
     return;
   }
-  activeIndex.value += 1;
+  if (finished.value) {
+    endReached.value = true;
+    return;
+  }
+  const previousCount = videos.value.length;
+  await loadMore();
+  if (videos.value.length > previousCount) activeIndex.value += 1;
+  else endReached.value = true;
 }
 function prev() {
+  endReached.value = false;
   if (activeIndex.value <= 0) {
     // 首条下滑：下拉刷新
     if (loadFailed.value || videos.value.length > 0) loadMore(true);
     return;
   }
   activeIndex.value -= 1;
+}
+
+let wheelLocked = false;
+function onWheel(event: WheelEvent) {
+  if (wheelLocked || Math.abs(event.deltaY) < 30) return;
+  wheelLocked = true;
+  if (event.deltaY > 0) void next();
+  else prev();
+  window.setTimeout(() => { wheelLocked = false; }, 380);
 }
 
 // ---------- 互动（乐观更新 + 失败回滚） ----------
@@ -155,14 +203,16 @@ async function favorite(item: FeedItem) {
 
 async function follow(authorId: string, active: boolean) {
   if (!requireLogin()) return;
-  const item = videos.value.find((v) => v.author.id === authorId);
-  const before = item ? { ...item.author } : null;
-  if (item) item.author = { ...item.author, following: active };
+  const authorItems = videos.value.filter((video) => video.author.id === authorId);
+  const previousStates = authorItems.map((item) => item.author.following);
+  authorItems.forEach((item) => { item.author = { ...item.author, following: active }; });
   track(EVENT_NAMES.FOLLOW_TOGGLED, { objectId: authorId, properties: { active } });
   try {
     await setFollow(authorId, active);
   } catch {
-    if (item && before) item.author = before;
+    authorItems.forEach((item, index) => {
+      item.author = { ...item.author, following: previousStates[index] };
+    });
     showToast('操作失败，已恢复');
   }
 }
@@ -206,6 +256,20 @@ function gotoDiscover() {
   router.push({ name: 'discover' });
 }
 
+async function switchFeed(mode: 'following' | 'recommend') {
+  if (mode === feedMode.value || loading.value) return;
+  if (mode === 'following' && !requireLogin()) return;
+  feedMode.value = mode;
+  videos.value = [];
+  cursor.value = null;
+  activeIndex.value = 0;
+  finished.value = false;
+  loadFailed.value = false;
+  endReached.value = false;
+  initialLoading.value = true;
+  await loadMore(true);
+}
+
 // 离开页面时暂停全部（切后台/路由由浏览器自动处理 video）
 onMounted(() => loadMore(true));
 </script>
@@ -214,9 +278,14 @@ onMounted(() => loadMore(true));
   <div class="feed-screen">
     <div
       class="feed-viewport"
-      @touchstart.passive="onTouchStart"
-      @touchmove.passive="onTouchMove"
-      @touchend.passive="onTouchEnd"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerCancel"
+      @wheel.prevent="onWheel"
+      @keydown.down.prevent="next"
+      @keydown.up.prevent="prev"
+      tabindex="0"
     >
       <div class="feed-track" :style="{ transform: `translateY(-${activeIndex * 100}%)` }">
         <FeedPlayer
@@ -241,8 +310,8 @@ onMounted(() => loadMore(true));
     <header class="feed-header">
       <button aria-label="直播"><van-icon name="tv-o" /></button>
       <div class="feed-tabs">
-        <button>关注</button>
-        <button class="active">推荐</button>
+        <button :class="{ active: feedMode === 'following' }" :aria-pressed="feedMode === 'following'" :disabled="loading" @click="switchFeed('following')">关注</button>
+        <button :class="{ active: feedMode === 'recommend' }" :aria-pressed="feedMode === 'recommend'" :disabled="loading" @click="switchFeed('recommend')">推荐</button>
       </div>
       <button aria-label="搜索" @click="gotoDiscover"><van-icon name="search" /></button>
     </header>
@@ -257,8 +326,14 @@ onMounted(() => loadMore(true));
         <button class="retry-btn" @click="loadMore(true)">重试</button>
       </div>
     </div>
+    <div class="spinner-wrap" v-else-if="videos.length === 0">
+      <div class="empty-state">
+        <van-icon name="friends-o" />
+        <p>{{ feedMode === 'following' ? '暂无关注视频' : '暂无推荐视频' }}</p>
+      </div>
+    </div>
 
-    <div class="load-more" v-if="finished && videos.length > 0">没有更多了</div>
+    <div class="load-more" v-if="showEndHint">没有更多了</div>
 
     <CommentPanel v-model:open="commentsOpen" :video="commentVideo" />
     <ShareSheet v-model:open="shareOpen" :video="shareVideo" @report-video="reportVideo" />
@@ -267,7 +342,7 @@ onMounted(() => loadMore(true));
 </template>
 
 <style scoped>
-.feed-viewport { position: absolute; inset: 0; overflow: hidden; }
+.feed-viewport { position: absolute; inset: 0; overflow: hidden; touch-action: none; }
 .feed-track { position: absolute; inset: 0; display: flex; flex-direction: column; transition: transform .32s cubic-bezier(.2,.8,.2,1); }
 .load-more { position: absolute; z-index: 9; bottom: 100px; width: 100%; text-align: center; color: #ffffffb3; font-size: 12px; pointer-events: none; }
 .retry-btn { padding: 6px 20px; border-radius: 16px; color: #fff; background: #ffffff2e; font-size: 13px; }

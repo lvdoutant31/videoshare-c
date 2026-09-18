@@ -103,7 +103,7 @@ export interface AppUser {
   wecomBound: boolean;
 }
 
-export interface PhoneLoginResult {
+export interface AppLoginResult {
   accessToken: string;
   expiresIn: number;
   user: AppUser;

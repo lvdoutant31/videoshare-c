@@ -4,7 +4,6 @@ import { useAuthStore } from './auth';
 import type { AppUser } from '../api/types';
 
 vi.mock('../api', () => ({
-  phoneLogin: vi.fn(),
   getMe: vi.fn(),
   logout: vi.fn(),
   wecomLogin: vi.fn(),
@@ -19,7 +18,7 @@ vi.mock('../api/http', () => ({
   },
 }));
 
-import { getMe, logout, phoneLogin, wecomLogin } from '../api';
+import { getMe, logout, wecomLogin } from '../api';
 import { isAuthenticated, tokenStore } from '../api/http';
 
 const mockUser: AppUser = {
@@ -38,18 +37,6 @@ describe('auth store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
-  });
-
-  it('登录成功写入 token 与用户信息', async () => {
-    vi.mocked(phoneLogin).mockResolvedValue({ accessToken: 'tok-1', expiresIn: 2592000, user: mockUser });
-    const auth = useAuthStore();
-
-    await auth.login('13800138000', '123456');
-
-    expect(phoneLogin).toHaveBeenCalledWith('13800138000', '123456', expect.any(String));
-    expect(tokenStore.set).toHaveBeenCalledWith('tok-1');
-    expect(auth.user?.nickname).toBe('测试用户');
-    expect(auth.loggedIn).toBe(true);
   });
 
   it('无 token 时 restore 直接完成且不请求', async () => {
@@ -76,7 +63,7 @@ describe('auth store', () => {
   });
 
   it('企微回调登录写入 token 与用户', async () => {
-    vi.mocked(wecomLogin).mockResolvedValue({ accessToken: 'wecom-tok', expiresIn: 2592000, user: mockUser });
+    vi.mocked(wecomLogin).mockResolvedValue({ accessToken: 'wecom-tok', expiresIn: 604800, user: mockUser });
     const auth = useAuthStore();
 
     await auth.loginWithWecom('code-1', 'state-1');

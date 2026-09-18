@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const proxyTarget = env.VITE_PROXY_TARGET ?? 'http://localhost:8080';
   return {
-    base: '/h5/',
+    base: '/videoshare/h5/',
     plugins: [vue()],
     server: {
       proxy: {

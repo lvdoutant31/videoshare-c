@@ -25,6 +25,7 @@ describe('http client', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/app/me');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer abc');
+    expect(init.credentials).toBe('include');
   });
 
   it('写入请求携带 Content-Type 与 Idempotency-Key', async () => {

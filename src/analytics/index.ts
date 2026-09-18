@@ -2,6 +2,7 @@
  * 埋点模块（PRD Analytics Events + API §8 /analytics/events/batch）。
  * 事件采集后批量上报；mock 模式下打印到 console.debug（联调切真实接口后走 batch 上报）。
  */
+import { createUuid } from '../utils/uuid';
 
 export const EVENT_NAMES = {
   APP_OPEN: 'app_open',
@@ -46,7 +47,7 @@ const FLUSH_INTERVAL_MS = 10_000;
 
 let sessionId = localStorage.getItem(SESSION_KEY) ?? '';
 if (!sessionId) {
-  sessionId = crypto.randomUUID();
+  sessionId = createUuid();
   localStorage.setItem(SESSION_KEY, sessionId);
 }
 

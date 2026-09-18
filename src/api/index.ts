@@ -1,37 +1,12 @@
 /**
  * 登录与账号 API（§2.1）。
- * mock 模式：任意手机号 + 验证码 123456 可登录；真实模式走 /app/auth/*。
+ * mock 模式保留企业微信授权夹具；真实模式走 /app/auth/*。
  */
 import { request } from './http';
+import { createUuid } from '../utils/uuid';
 import { USE_MOCK, delay, paginate } from './mock';
 import { mockFeed, mockHistory, mockReportReasons, mockShareInbox, mockUsers } from './mock/data';
-import type { AgreementInfo, AgreementType, AppUser, Author, CursorPage, FeedItem, HistoryItem, InternalShareResult, PhoneLoginResult, ReportReason, ShareInboxItem, ShareRecipient, WecomAuthorizeResult } from './types';
-
-/** 发送手机号验证码 */
-export function sendPhoneCode(phone: string): Promise<{ expiresIn: number }> {
-  if (USE_MOCK) {
-    return delay(300).then(() => ({ expiresIn: 300 }));
-  }
-  return request('/app/auth/phone/send-code', { method: 'POST', body: { phone } });
-}
-
-/** 手机号验证码登录/注册；返回 App 会话与当前用户 */
-export async function phoneLogin(phone: string, code: string, agreementVersion: string): Promise<PhoneLoginResult> {
-  if (USE_MOCK) {
-    await delay(500);
-    if (code !== '123456') {
-      const error = new Error('验证码错误') as Error & { code?: string };
-      error.code = 'VALIDATION_FAILED';
-      throw error;
-    }
-    const user = mockUsers[0];
-    return { accessToken: 'mock-access-token', expiresIn: 2592000, user: { ...user, nickname: user.nickname } };
-  }
-  return request('/app/auth/phone/login', {
-    method: 'POST',
-    body: { phone, code, agreementVersion },
-  });
-}
+import type { AgreementInfo, AgreementType, AppLoginResult, AppUser, Author, CursorPage, FeedItem, HistoryItem, InternalShareResult, ReportReason, ShareInboxItem, ShareRecipient, WecomAuthorizeResult } from './types';
 
 /** 当前用户资料 */
 export function getMe(): Promise<AppUser> {
@@ -63,6 +38,14 @@ export function getRecommendFeed(cursor: string | null, limit = 5): Promise<Curs
     return delay(350).then(() => paginate(mockFeed, cursor, limit));
   }
   return request(`/app/feed/recommend?cursor=${cursor ?? ''}&limit=${limit}`);
+}
+
+/** 当前用户关注作者的视频流 */
+export function getFollowingFeed(cursor: string | null, limit = 5): Promise<CursorPage<FeedItem>> {
+  if (USE_MOCK) {
+    return delay(350).then(() => paginate(mockFeed.filter((video) => video.author.following), cursor, limit));
+  }
+  return request(`/app/feed/following?cursor=${cursor ?? ''}&limit=${limit}`);
 }
 
 export function getVideoDetail(videoId: string): Promise<FeedItem> {
@@ -101,6 +84,48 @@ export function getAuthorVideos(userId: string, cursor: string | null, limit = 9
   return request(`/app/users/${userId}/videos?cursor=${cursor ?? ''}&limit=${limit}`);
 }
 
+/** 当前用户收藏的视频 */
+export function getFavoriteVideos(cursor: string | null = null, limit = 20): Promise<CursorPage<FeedItem>> {
+  if (USE_MOCK) {
+    return delay(250).then(() => paginate(mockFeed.filter((video) => video.viewerState.favorited), cursor, limit));
+  }
+  return request(`/app/me/favorites?cursor=${cursor ?? ''}&limit=${limit}`);
+}
+
+/** 当前用户点赞的视频 */
+export function getLikedVideos(cursor: string | null = null, limit = 20): Promise<CursorPage<FeedItem>> {
+  if (USE_MOCK) {
+    return delay(250).then(() => paginate(mockFeed.filter((video) => video.viewerState.liked), cursor, limit));
+  }
+  return request(`/app/me/likes?cursor=${cursor ?? ''}&limit=${limit}`);
+}
+
+/** 当前用户的关注列表 */
+export function getFollowing(): Promise<Author[]> {
+  if (USE_MOCK) {
+    return delay(200).then(() => mockUsers.slice(0, 3).map((user) => ({
+      id: user.id,
+      nickname: user.nickname,
+      avatarUrl: user.avatarUrl,
+      following: true,
+    })));
+  }
+  return request('/app/me/following');
+}
+
+/** 当前用户的粉丝列表 */
+export function getFollowers(): Promise<Author[]> {
+  if (USE_MOCK) {
+    return delay(200).then(() => mockUsers.slice(0, 3).map((user) => ({
+      id: user.id,
+      nickname: user.nickname,
+      avatarUrl: user.avatarUrl,
+      following: false,
+    })));
+  }
+  return request('/app/me/followers');
+}
+
 /** 互动（§2.3）：点赞/收藏/关注，目标状态幂等 */
 export function setLike(videoId: string, active: boolean): Promise<{ active: boolean; count: number }> {
   if (USE_MOCK) {
@@ -109,7 +134,7 @@ export function setLike(videoId: string, active: boolean): Promise<{ active: boo
       return { active, count: video ? Math.max(0, video.stats.likeCount + (active ? 1 : -1)) : 0 };
     });
   }
-  return request(`/app/videos/${videoId}/like`, { method: 'PUT', body: { active }, idempotencyKey: crypto.randomUUID() });
+  return request(`/app/videos/${videoId}/like`, { method: 'PUT', body: { active }, idempotencyKey: createUuid() });
 }
 
 export function setFavorite(videoId: string, active: boolean): Promise<{ active: boolean; count: number }> {
@@ -119,14 +144,14 @@ export function setFavorite(videoId: string, active: boolean): Promise<{ active:
       return { active, count: video ? Math.max(0, video.stats.favoriteCount + (active ? 1 : -1)) : 0 };
     });
   }
-  return request(`/app/videos/${videoId}/favorite`, { method: 'PUT', body: { active }, idempotencyKey: crypto.randomUUID() });
+  return request(`/app/videos/${videoId}/favorite`, { method: 'PUT', body: { active }, idempotencyKey: createUuid() });
 }
 
 export function setFollow(userId: string, active: boolean): Promise<{ active: boolean; count: number }> {
   if (USE_MOCK) {
     return delay(180).then(() => ({ active, count: 25420 + (active ? 1 : -1) }));
   }
-  return request(`/app/users/${userId}/follow`, { method: 'PUT', body: { active }, idempotencyKey: crypto.randomUUID() });
+  return request(`/app/users/${userId}/follow`, { method: 'PUT', body: { active }, idempotencyKey: createUuid() });
 }
 
 // ---------- 评论与举报（§2.4） ----------
@@ -210,7 +235,7 @@ export function sendInternalShare(videoId: string, recipientIds: string[]): Prom
       return { batchId: `batch-${Date.now()}`, results };
     });
   }
-  return request(`/app/videos/${videoId}/shares/internal`, { method: 'POST', body: { recipientIds }, idempotencyKey: crypto.randomUUID() });
+  return request(`/app/videos/${videoId}/shares/internal`, { method: 'POST', body: { recipientIds }, idempotencyKey: createUuid() });
 }
 
 /** 分享收件箱列表 */
@@ -261,23 +286,16 @@ export function getWecomAuthorizeUrl(): Promise<WecomAuthorizeResult> {
 }
 
 /** 企微回调登录：用 OAuth code + state 换取本平台会话 */
-export async function wecomLogin(code: string, state: string): Promise<PhoneLoginResult> {
+export async function wecomLogin(code: string, state: string): Promise<AppLoginResult> {
   if (USE_MOCK) {
     await delay(400);
     const user = mockUsers[0];
-    return { accessToken: 'mock-wecom-token', expiresIn: 2592000, user: { ...user } };
+    return { accessToken: 'mock-wecom-token', expiresIn: 604800, user: { ...user } };
   }
   return request('/app/auth/wecom/callback', { method: 'POST', body: { code, state } });
 }
 
-// ---------- §2.1 账号设置：企微绑定 / 注销 / 协议 ----------
-/** 解绑企微身份；必须仍保留一种可用登录方式 */
-export function unbindWecom(): Promise<void> {
-  if (USE_MOCK) {
-    return delay(250);
-  }
-  return request('/app/me/wecom-binding', { method: 'DELETE' });
-}
+// ---------- §2.1 账号设置：注销 / 协议 ----------
 
 /** 发起账号注销申请 */
 export function requestCancellation(reason = ''): Promise<void> {
