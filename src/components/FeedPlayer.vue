@@ -8,7 +8,12 @@ import type { FeedItem } from '../api/types';
 import { formatCount, formatDuration } from '../utils/format';
 import { EVENT_NAMES, track } from '../analytics';
 
-const props = defineProps<{ item: FeedItem; active: boolean; preload: boolean }>();
+const props = defineProps<{
+  item: FeedItem;
+  active: boolean;
+  preload: 'auto' | 'metadata' | 'none';
+  loadSource: boolean;
+}>();
 const emit = defineEmits<{
   (e: 'open-comments', item: FeedItem): void;
   (e: 'open-share', item: FeedItem): void;
@@ -33,7 +38,7 @@ const MUTE_KEY = 'yingliu.muted';
 const mutedPref = ref(localStorage.getItem(MUTE_KEY) !== '0');
 let retryCount = 0;
 
-const videoUrl = computed(() => props.item.videoUrl ?? '');
+const mediaSrc = computed(() => (props.loadSource ? props.item.videoUrl ?? undefined : undefined));
 const durationLabel = computed(() => formatDuration(props.item.durationMs));
 const likeLabel = computed(() => formatCount(props.item.stats.likeCount));
 const favoriteLabel = computed(() => formatCount(props.item.stats.favoriteCount));
@@ -44,7 +49,7 @@ function persistMuted() {
 
 async function play() {
   const video = videoEl.value;
-  if (!video || !videoUrl.value || failed.value) return;
+  if (!video || !mediaSrc.value || failed.value) return;
   if (ended.value || (Number.isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration - 0.05)) {
     video.currentTime = 0;
     progress.value = 0;
@@ -91,8 +96,8 @@ watch(
 );
 
 watch(
-  () => props.item.videoUrl,
-  () => {
+  mediaSrc,
+  (source) => {
     failed.value = false;
     retryCount = 0;
     progress.value = 0;
@@ -101,6 +106,15 @@ watch(
     effectiveReported = false;
     completeReported = false;
     lastProgressReport = 0;
+    if (!source) {
+      pause();
+      const video = videoEl.value;
+      if (video) {
+        video.removeAttribute('src');
+        video.load();
+      }
+      return;
+    }
     if (props.active) play();
   },
 );
@@ -144,7 +158,7 @@ function onPressEnd(): boolean {
 
 function onError() {
   retryCount += 1;
-  if (retryCount <= 1 && videoUrl.value) {
+  if (retryCount <= 1 && mediaSrc.value) {
     // 自动重试一次（下架对象转私有读后旧链接 403，也会走到这里）
     const video = videoEl.value;
     if (video) {
@@ -356,9 +370,9 @@ defineExpose({ play, pause, toggle });
     <video
       ref="videoEl"
       class="feed-video"
-      :src="videoUrl"
+      :src="mediaSrc"
       :poster="item.cover?.coverUrl ?? undefined"
-      :preload="preload ? 'auto' : 'none'"
+      :preload="preload"
       playsinline
       webkit-playsinline
       x5-playsinline

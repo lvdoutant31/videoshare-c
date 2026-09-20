@@ -29,9 +29,9 @@ const item: FeedItem = {
   viewerState: { liked: false, favorited: false },
 };
 
-function mountPlayer() {
+function mountPlayer(props: Partial<{ active: boolean; preload: 'auto' | 'metadata' | 'none'; loadSource: boolean }> = {}) {
   return mount(FeedPlayer, {
-    props: { item, active: false, preload: false },
+    props: { item, active: false, preload: 'none', loadSource: true, ...props },
     global: {
       stubs: {
         'van-icon': true,
@@ -83,6 +83,23 @@ describe('FeedPlayer controls', () => {
     await tapSurface(wrapper);
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce();
     expect(wrapper.get('[aria-label="播放视频"]')).toBeTruthy();
+  });
+
+  it('uses the requested preload mode and detaches distant media sources', async () => {
+    const current = mountPlayer({ active: true, preload: 'auto', loadSource: true });
+    expect(current.get('video').attributes('preload')).toBe('auto');
+    expect(current.get('video').attributes('src')).toBe('/video.mp4');
+
+    const next = mountPlayer({ preload: 'metadata', loadSource: true });
+    expect(next.get('video').attributes('preload')).toBe('metadata');
+    expect(next.get('video').attributes('src')).toBe('/video.mp4');
+
+    const previous = mountPlayer({ preload: 'none', loadSource: true });
+    expect(previous.get('video').attributes('preload')).toBe('none');
+    expect(previous.get('video').attributes('src')).toBe('/video.mp4');
+
+    const distant = mountPlayer({ preload: 'none', loadSource: false });
+    expect(distant.get('video').attributes('src')).toBeUndefined();
   });
 
   it('keeps long press, moved pointers, and double tap separate from single-tap playback', async () => {
