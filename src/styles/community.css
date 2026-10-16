@@ -1,0 +1,172 @@
+/* Shared community surfaces. Media players retain their dark viewing canvas. */
+button:disabled { cursor: not-allowed; opacity: .55; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.app-root { background: var(--soft); }
+.app-root .light-page { color: var(--text-strong); background: var(--paper); }
+.app-root .light-page .profile-nav { height: 60px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--paper); }
+.app-root .light-page .profile-nav > button { min-width: 44px; min-height: 44px; color: var(--text-muted); }
+.app-root .light-page .profile-nav > strong { font-size: 18px; }
+.app-root .light-page .profile-scroll { top: 60px; padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+.app-root.community-shell .profile-scroll { bottom: var(--nav-height); }
+.app-root .me-scroll { bottom: var(--nav-height); }
+.app-root .light-page .profile-bio { min-height: 0; padding: 24px 16px 20px; }
+.app-root .light-page .profile-bio h1 { font-size: 24px; line-height: 1.4; }
+.app-root .light-page .profile-bio > small, .app-root .light-page .profile-bio > p { font-size: 14px; line-height: 1.6; color: var(--text-muted); }
+.app-root .light-page .profile-stats { display: flex; flex-wrap: wrap; gap: 24px; margin: 20px 0; }
+.app-root .light-page .profile-stats b { font-size: 18px; }
+.app-root .light-page .profile-stats span { font-size: 12px; color: var(--text-muted); }
+.app-root .light-page .profile-actions button { min-height: 44px; min-width: 88px; border-radius: 8px; font-size: 14px; }
+.app-root .light-page .profile-actions .primary { color: white; background: var(--accent); }
+.app-root .light-page .profile-tabs { height: 52px; border-bottom: 1px solid var(--line); }
+.app-root .light-page .profile-tabs button { min-height: 44px; font-size: 16px; color: var(--text-muted); }
+.app-root .light-page .profile-tabs button.active { color: var(--accent); }
+.app-root .light-page .profile-tabs button.active::after { background: var(--accent); }
+.app-root .collection-profile .profile-content { max-width: 1040px; margin: auto; padding: 24px 16px; }
+.app-root .collection-profile .me-titlebar { padding: 0 0 24px; }
+.app-root .collection-profile .me-titlebar h1 { font-size: 26px; }
+.app-root .collection-profile .me-titlebar button { min-height: 44px; color: var(--text-muted); }
+.app-root .collection-profile .me-identity { padding: 0; gap: 16px; }
+.app-root .collection-profile .me-identity > img { width: 72px; height: 72px; }
+.app-root .collection-profile .me-identity h2 { font-size: 22px; }
+.app-root .collection-profile .me-identity p, .app-root .collection-profile .me-identity small { font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+.app-root .collection-profile .me-metrics { padding: 24px 0; margin: 0; }
+.app-root .collection-profile .me-metrics b { font-size: 22px; }
+.app-root .collection-profile .me-metrics > div > span { font-size: 13px; color: var(--text-muted); }
+.app-root .collection-profile .collection-tabs { padding: 0; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.app-root .collection-profile .collection-tabs button { min-height: 48px; font-size: 16px; }
+.app-root .collection-profile .collection-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+.app-root .page .content-collection { padding: 16px 16px 24px; }
+.app-root .collection-profile .content-collection { padding: 0 0 24px; }
+.app-root .page .content-collection .collection-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 12px; }
+.app-root .page .content-collection .collection-cover { aspect-ratio: 4 / 3; background: var(--soft); }
+.app-root .page .content-collection .collection-item strong { font-size: 15px; line-height: 1.5; min-height: 45px; color: var(--text-strong); font-weight: 600; }
+.app-root .page .content-collection :is(.collection-type, .collection-meta, .collection-status, .collection-stats, .collection-item small) { font-size: 12px; }
+.app-root .page .content-collection .collection-status { color: #854d0e; background: #fef9c3; }
+.app-root .page .content-collection .collection-more { min-height: 44px; border-radius: 8px; color: var(--accent); }
+.app-root .page .content-collection .collection-empty { color: var(--text-muted); font-size: 14px; }
+.app-root .page .managed-content .collection-grid { grid-template-columns:1fr; gap:0; }
+.app-root .page .managed-content .collection-item strong { min-height:0; }
+.app-root .light-page .user-list-item { min-height: 88px; gap: 14px; padding: 16px; border-bottom: 1px solid var(--line); }
+.app-root .light-page .user-list-item .copy strong { font-size: 16px; }
+.app-root .light-page .user-list-item .copy small { font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+.app-root .light-page .user-list-item button { min-height: 44px; min-width: 80px; border-radius: 8px; }
+.app-root .light-page .message-section { padding: 20px 16px; }
+.app-root .light-page .message-section h2 { margin: 0 0 16px; font-size: 18px; color: var(--text-strong); }
+.app-root .light-page .reply-item { gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.app-root .light-page .reply-avatar { width: 44px; height: 44px; }
+.app-root .light-page .reply-copy { min-width: 0; }
+.app-root .light-page .reply-copy strong, .app-root .light-page .inbox-item .copy strong { font-size: 16px; line-height: 1.5; }
+.app-root .light-page .reply-copy p { font-size: 15px; line-height: 1.6; }
+.app-root .light-page .reply-copy blockquote { margin: 10px 0; padding: 10px 12px; background: var(--soft); color: var(--text-muted); font-size: 13px; line-height: 1.6; border-radius: 8px; }
+.app-root .light-page .reply-copy small, .app-root .light-page .inbox-item .copy small { font-size: 12px; color: var(--text-muted); }
+.app-root .light-page .inline-reply { display: flex; gap: 8px; margin-top: 12px; }
+.app-root .light-page .inline-reply input { flex: 1; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); font-size: 16px; }
+.app-root .light-page .inline-reply button { min-height: 44px; padding: 0 12px; color: var(--accent); }
+.app-root .light-page .inbox-item { padding: 16px 0; gap: 12px; }
+.app-root .light-page .inbox-item .thumb { width: 104px; height: 72px; border-radius: 8px; overflow: hidden; }
+.app-root .light-page .settings-scroll { top: 60px; background: var(--soft); padding: 16px 16px max(24px, env(safe-area-inset-bottom)); }
+.app-root .light-page .settings-section { padding: 20px; margin: 0 0 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.app-root .light-page .settings-section h3 { margin: 0 0 16px; font-size: 18px; color: var(--text-strong); }
+.app-root .light-page .settings-section .field-row { gap: 12px; padding: 12px 0; font-size: 14px; }
+.app-root .light-page .settings-section :is(input, textarea) { min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text-strong); background: var(--soft); font-size: 16px; }
+.app-root .light-page .settings-section .primary-btn { min-height: 48px; border-radius: 8px; background: var(--accent); }
+.app-root .light-page .settings-section :is(.danger-btn, .link-btn), .app-root .light-page .settings-links button { min-height: 44px; }
+.app-root .light-page .settings-section small { color: var(--text-muted); font-size: 12px; }
+.app-root .light-page .recipient-search { top: 60px; height: 64px; }
+.app-root .light-page .recipient-search .search-field { height: 44px; background: var(--soft); border: 1px solid var(--line); }
+.app-root .light-page .recipient-search input { font-size: 16px; }
+.app-root .light-page .recipient-body { top: 124px; bottom: calc(80px + env(safe-area-inset-bottom)); }
+.app-root .light-page .recipient-footer { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+.app-root .light-page .recipient-footer .send-btn { border-radius: 8px; min-height: 48px; background: var(--accent); }
+.app-root .landing-screen { background: var(--paper); color: var(--text-strong); overflow-y: auto; }
+.app-root .landing-info { max-width: 760px; width: 100%; margin: 0 auto; padding: 24px 16px; }
+.app-root .landing-info h1 { font-size: 24px; line-height: 1.4; }
+.app-root .landing-info p { font-size: 16px; line-height: 1.75; color: var(--text-muted); }
+.app-root .landing-open { border-radius: 8px; color: white; background: var(--accent); }
+.app-root .feed-header { top: 0; height: 60px; padding: 0 16px; color: var(--text-strong); background: var(--paper); border-bottom: 1px solid var(--line); }
+.app-root .feed-header > button { width: 44px; height: 44px; font-size: 22px; }
+.app-root .feed-page-title { font-size: 18px; }
+.app-root .feed-tabs { align-items: center; height: 60px; font-size: 16px; }
+.app-root .feed-tabs button { min-height: 44px; }
+.app-root .feed-tabs button.active { color: var(--accent); }
+.app-root .feed-tabs .active::after { background: var(--accent); }
+.app-root .feed-screen .feed-viewport { top: 60px; bottom: var(--nav-height); }
+.app-root .feed-meta { bottom: 46px; }
+.app-root .action-bar { bottom: 48px; gap: 12px; }
+.app-root .action-item { min-height: 44px; }
+.app-root .action-item .van-icon { font-size: 28px; }
+.app-root .flow-progress { bottom: 4px; height: 24px; }
+.app-root .flow-progress i { background: var(--accent); }
+.app-root .feed-duration { bottom: 30px; font-size:12px; }
+.app-root .light-page .inline-reply button { background:var(--soft); }
+.app-root .creator-anchor span { background: var(--accent); }
+.app-root .vinyl { display: none; }
+.app-root .feed-tags span { font-size: 12px; }
+
+/* Brand image remains an intact supplied asset; the form is a quiet reading surface. */
+.auth-screen { position: absolute; inset: 0; overflow-y: auto; background: var(--paper); color: var(--text-strong); }
+.auth-brand { position: relative; aspect-ratio: 1; overflow: hidden; background: #0841a5; }
+.auth-brand > img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center top; }
+.brand-company { display: none; }
+.auth-panel { position: relative; max-width: 480px; padding: 24px; margin: 0 auto; background: var(--paper); }
+.auth-panel-header { margin-bottom: 24px; }
+.auth-panel-header h2 { margin: 8px 0; font-size: 26px; line-height: 1.3; }
+.auth-panel-header p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text-muted); }
+.auth-panel-header .auth-overline { font-size: 12px; }
+.auth-form { display: grid; gap: 16px; }
+.auth-field { display: grid; gap: 8px; font-size: 14px; }
+.auth-input-wrap { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; align-items: center; min-height: 48px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); }
+.auth-input-wrap > .van-icon { font-size: 18px; color: var(--text-muted); }
+.auth-input-wrap input { width: 100%; min-width: 0; height: 46px; border: 0; background: transparent; color: var(--text-strong); font-size: 16px; }
+.auth-input-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px #2563eb14; }
+.auth-input-wrap input:focus-visible { outline: 0; }
+.password-toggle { min-width: 44px; min-height: 44px; color: var(--text-muted); font-size: 20px; }
+.auth-options { display: flex; justify-content: flex-end; margin-top: -8px; }
+.auth-options button, .auth-switch button { min-height: 44px; color: var(--accent); font-size: 14px; }
+.auth-primary { width: 100%; min-height: 48px; border-radius: 8px; background: var(--accent); color: white; font-size: 16px; font-weight: 600; }
+.auth-agreement-check { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; color: var(--text-muted); font-size: 12px; line-height: 1.8; }
+.auth-agreement-check input { flex-shrink: 0; width: 20px; height: 20px; margin: 1px 0; accent-color: var(--accent); }
+.auth-agreement-check a { color: var(--accent); text-decoration: underline; }
+.auth-switch { margin: 16px 0 0; text-align: center; color: var(--text-muted); font-size: 14px; }
+.auth-footer { padding: 8px 16px max(16px, env(safe-area-inset-bottom)); color: var(--text-muted); font-size: 12px; text-align: center; }
+.auth-register .auth-brand { height: 156px; aspect-ratio: auto; }
+.auth-register .auth-panel { padding-top: 20px; }
+.auth-register .auth-panel-header { margin-bottom: 16px; }
+.auth-reset-note p { line-height: 1.6; color: var(--text-muted); }
+@media (min-width: 768px) {
+  .app-root .page .content-collection .collection-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 20px; }
+}
+@media (min-width: 960px) {
+  .app-root .light-page .profile-nav, .app-root .light-page .profile-scroll, .app-root .light-page .settings-scroll, .app-root .light-page .recipient-search, .app-root .light-page .recipient-body, .app-root .light-page .recipient-footer { width: min(100%, 1040px); left: 50%; transform: translateX(-50%); }
+  .app-root .light-page .settings-scroll { width: min(100%, 800px); }
+  .app-root.community-shell .profile-scroll, .app-root .me-scroll { bottom: 0; }
+  .app-root .feed-screen .feed-viewport { bottom: 0; }
+  .auth-screen { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(420px, 1fr); align-items: center; }
+  .auth-brand, .auth-register .auth-brand { aspect-ratio: auto; height: 100%; min-height: 100dvh; align-self: stretch; }
+  .auth-brand > img { position: absolute; inset: 0; object-position: center; }
+  .brand-company { display: block; position: absolute; inset: auto 0 0; padding: 64px 40px 48px; color: white; background: linear-gradient(transparent, #07111fbf); }
+  .brand-company h1 { margin: 0; font-size: clamp(22px, 2.2vw, 32px); line-height: 1.5; }
+  .brand-company p { font-size: 16px; }
+  .auth-panel, .auth-register .auth-panel { width: 100%; padding: 48px 32px 64px; }
+  .auth-panel-header .auth-overline { margin-bottom: 16px; }
+  .auth-footer { position: absolute; bottom: 0; right: 0; width: 47.6%; }
+}
+
+.app-root .collection-profile .me-metrics { background:var(--paper); border:0; border-radius:0; }
+.app-root .collection-profile .collection-tabs button { font-size:16px; }
+.app-root .light-page .settings-section .field-row input { text-align:left; }
+.app-root .light-page .settings-section :is(input,textarea):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.app-root .light-page .settings-section .field-row { grid-template-columns:64px minmax(0,1fr); }
+.app-root .light-page .settings-section .field-row.static { grid-template-columns:minmax(64px,1fr) auto; }
+.app-root .light-page .settings-section .field-row.static .link-btn { grid-column:2; }
+.app-root .light-page .settings-section .danger-btn { background:transparent; }
+.app-root .light-page .inline-reply button { border-radius:8px; background:var(--soft); color:var(--accent); }
+.app-root .light-page .inline-reply input { border-radius:8px; }
+.app-root .light-page .message-section + .message-section { border-top:8px solid var(--soft); }
+@media(min-width:960px) { .app-root .page .managed-content .collection-grid { grid-template-columns:1fr; } }
+
+/* SpringCheck adaptation: preserve native checkbox behavior and form values. */
+.auth-agreement-check input, .publish-page fieldset input { transition:transform 220ms cubic-bezier(.34,1.56,.64,1); }
+.auth-agreement-check input:checked, .publish-page fieldset input:checked { animation:spring-check 300ms ease-out; }
+@keyframes spring-check { 40% { transform:scale(.75); } 70% { transform:scale(1.18); } }
+@media(prefers-reduced-motion:reduce) { .auth-agreement-check input, .publish-page fieldset input { animation:none; transition:none; } }
