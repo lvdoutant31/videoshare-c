@@ -96,7 +96,7 @@ export const mockFeed: FeedItem[] = SAMPLE_VIDEOS.map((url, index) => {
     },
     cover: { id: String(50001 + index), contentType: 'image/jpeg', width: 420, height: 560, coverUrl: COVERS[index % COVERS.length] },
     tags: [{ id: '20', name: index % 2 === 0 ? '安全培训' : '企业文化' }],
-    stats: { playCount: 128460 - index * 1200, likeCount: 1260 + index * 31, favoriteCount: 320 + index * 8, commentCount: 98 + index * 3 },
+    stats: { playCount: 128460 - index * 1200, likeCount: 1260 + index * 31, favoriteCount: 320 + index * 8, commentCount: 98 + index * 3, watchTimeMs: 128460 * 45000 - index * 1200 * 45000 },
     publishedAt: new Date(Date.now() - index * 3600_000 * 5).toISOString(),
     viewerState: { liked: index % 4 === 1, favorited: index % 5 === 2 },
   };

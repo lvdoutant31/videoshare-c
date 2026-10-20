@@ -7,6 +7,8 @@ vi.mock('../api', () => ({
   getMe: vi.fn(),
   logout: vi.fn(),
   wecomLogin: vi.fn(),
+  passwordLogin: vi.fn(),
+  updateMe: vi.fn(),
 }));
 
 vi.mock('../api/http', () => ({
@@ -18,7 +20,7 @@ vi.mock('../api/http', () => ({
   },
 }));
 
-import { getMe, logout, wecomLogin } from '../api';
+import { getMe, logout, passwordLogin, updateMe, wecomLogin } from '../api';
 import { isAuthenticated, tokenStore } from '../api/http';
 
 const mockUser: AppUser = {
@@ -34,6 +36,14 @@ const mockUser: AppUser = {
 };
 
 describe('auth store', () => {
+  it('密码登录写入现有 token 与用户', async () => {
+    vi.mocked(passwordLogin).mockResolvedValue({ accessToken: 'password-tok', expiresIn: 604800, user: mockUser });
+    const auth = useAuthStore();
+    await auth.login('13800138000', 'SecurePass123!');
+    expect(passwordLogin).toHaveBeenCalledWith('13800138000', 'SecurePass123!');
+    expect(tokenStore.set).toHaveBeenCalledWith('password-tok');
+    expect(auth.user).toEqual(mockUser);
+  });
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
@@ -83,5 +93,17 @@ describe('auth store', () => {
     expect(logout).toHaveBeenCalled();
     expect(tokenStore.clear).toHaveBeenCalled();
     expect(auth.user).toBeNull();
+  });
+
+  it('保存资料调用 PATCH 接口并使用服务端返回值', async () => {
+    const updated = { ...mockUser, nickname: '新姓名', bio: '新简介' };
+    vi.mocked(updateMe).mockResolvedValue(updated);
+    const auth = useAuthStore();
+    auth.user = mockUser;
+
+    await auth.patchProfile({ nickname: '新姓名', bio: '新简介' });
+
+    expect(updateMe).toHaveBeenCalledWith({ nickname: '新姓名', bio: '新简介' });
+    expect(auth.user).toEqual(updated);
   });
 });

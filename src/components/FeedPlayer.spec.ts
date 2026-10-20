@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
 import type { FeedItem } from '../api/types';
 
 vi.mock('../analytics', () => ({
@@ -14,6 +15,8 @@ vi.mock('../analytics', () => ({
 }));
 
 import FeedPlayer from './FeedPlayer.vue';
+import { track } from '../analytics';
+import * as api from '../api';
 
 const item: FeedItem = {
   id: 'video-1',
@@ -24,7 +27,7 @@ const item: FeedItem = {
   author: { id: 'author-1', nickname: '测试作者', avatarUrl: null, following: false },
   cover: null,
   tags: [],
-  stats: { playCount: 0, likeCount: 0, favoriteCount: 0, commentCount: 0 },
+  stats: { playCount: 0, likeCount: 0, favoriteCount: 0, commentCount: 0, watchTimeMs: 0 },
   publishedAt: '2026-09-16T00:00:00Z',
   viewerState: { liked: false, favorited: false },
 };
@@ -64,7 +67,9 @@ async function tapSurface(wrapper: ReturnType<typeof mountPlayer>, x = 120, y = 
 
 describe('FeedPlayer controls', () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
     vi.useFakeTimers();
+    vi.clearAllMocks();
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
   });
@@ -85,10 +90,26 @@ describe('FeedPlayer controls', () => {
     expect(wrapper.get('[aria-label="播放视频"]')).toBeTruthy();
   });
 
+  it('does not retry muted autoplay after a pending play was cancelled by pause', async () => {
+    let rejectPlay!: (error: Error) => void;
+    vi.mocked(HTMLMediaElement.prototype.play).mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectPlay = reject; }));
+    const wrapper = mountPlayer();
+    const pending = wrapper.vm.play();
+    wrapper.vm.pause();
+    rejectPlay(new DOMException('play interrupted by pause', 'AbortError'));
+    await pending;
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce();
+    expect(wrapper.vm.isPlaying()).toBe(false);
+    wrapper.unmount();
+  });
+
   it('uses the requested preload mode and detaches distant media sources', async () => {
     const current = mountPlayer({ active: true, preload: 'auto', loadSource: true });
     expect(current.get('video').attributes('preload')).toBe('auto');
     expect(current.get('video').attributes('src')).toBe('/video.mp4');
+    expect(current.get('video').attributes('autoplay')).toBeUndefined();
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    expect(current.get('video').attributes('poster')).toBeUndefined();
 
     const next = mountPlayer({ preload: 'metadata', loadSource: true });
     expect(next.get('video').attributes('preload')).toBe('metadata');
@@ -100,6 +121,45 @@ describe('FeedPlayer controls', () => {
 
     const distant = mountPlayer({ preload: 'none', loadSource: false });
     expect(distant.get('video').attributes('src')).toBeUndefined();
+  });
+
+  it('uses the original audio by default without rendering a sound control', async () => {
+    const wrapper = mountPlayer();
+    const video = wrapper.get('video').element as HTMLVideoElement;
+
+    expect(video.muted).toBe(false);
+    expect(wrapper.find('[aria-label="开启声音"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="关闭声音"]').exists()).toBe(false);
+  });
+
+  it('reports five-second wall-clock watch heartbeats with a playback session', async () => {
+    const wrapper = mountPlayer();
+    const video = wrapper.get('video').element as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 100 });
+    Object.defineProperty(video, 'playbackRate', { configurable: true, writable: true, value: 2 });
+    video.currentTime = 10;
+
+    await wrapper.get('video').trigger('playing');
+    vi.advanceTimersByTime(5_000);
+
+    expect(track).toHaveBeenCalledWith('video_play_progress', expect.objectContaining({
+      videoId: 'video-1',
+      playSessionId: expect.any(String),
+      properties: expect.objectContaining({
+        watchedDeltaMs: 5_000,
+        positionMs: 10_000,
+        playbackRate: 2,
+      }),
+    }));
+  });
+
+  it('falls back to muted playback when audible autoplay is blocked', async () => {
+    vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error('autoplay blocked'));
+    const wrapper = mountPlayer({ active: true });
+    await flushPromises();
+
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2);
+    expect((wrapper.get('video').element as HTMLVideoElement).muted).toBe(true);
   });
 
   it('keeps long press, moved pointers, and double tap separate from single-tap playback', async () => {
@@ -160,6 +220,8 @@ describe('FeedPlayer controls', () => {
 
     await progress.trigger('pointerdown', { pointerId: 2, clientX: 50 });
     await progress.trigger('pointermove', { pointerId: 2, clientX: 150 });
+    expect(video.currentTime).toBe(100);
+    expect(wrapper.get('.seek-preview').text()).toContain('01:15');
     await progress.trigger('pointerup', { pointerId: 2, clientX: 150 });
 
     expect(video.currentTime).toBe(75);
@@ -168,5 +230,47 @@ describe('FeedPlayer controls', () => {
     await tapSurface(wrapper);
     expect(video.currentTime).toBe(75);
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a drag without seeking and keeps a paused video paused', async () => {
+    const wrapper = mountPlayer(); const video = wrapper.get('video').element as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 100 }); video.currentTime = 20;
+    const bar = wrapper.get('.flow-progress');
+    vi.spyOn(bar.element, 'getBoundingClientRect').mockReturnValue({ left:0, width:200 } as DOMRect);
+    await bar.trigger('pointerdown', { pointerId:4, clientX:40 });
+    await bar.trigger('pointermove', { pointerId:4, clientX:180 });
+    await wrapper.get('video').trigger('timeupdate');
+    expect(wrapper.get('.seek-preview').text()).toContain('01:30');
+    await bar.trigger('pointercancel', { pointerId:4 });
+    expect(video.currentTime).toBe(20); expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
+    expect(bar.classes()).not.toContain('seeking'); wrapper.unmount();
+  });
+
+  it('supports keyboard seeking without leaking arrow keys to feed navigation', async () => {
+    const wrapper = mountPlayer(); const video = wrapper.get('video').element as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 100 }); video.currentTime = 20;
+    await wrapper.get('.flow-progress').trigger('keydown', { key:'ArrowRight' });
+    expect(video.currentTime).toBe(25);
+    await wrapper.get('.flow-progress').trigger('keydown', { key:'Home' });
+    expect(video.currentTime).toBe(0); wrapper.unmount();
+  });
+
+  it('switches actual sources while retaining position, speed and mute state', async () => {
+    vi.spyOn(api, 'getVideoSources').mockResolvedValue([
+      { id:'optimized',label:'流畅版',url:'/video.mp4',width:1280,height:720 },
+      { id:'original',label:'原画',url:'/original.mp4',width:1920,height:1080 },
+    ]);
+    const wrapper = mountPlayer({ active:true }); await flushPromises();
+    const video = wrapper.get('video').element as HTMLVideoElement;
+    Object.defineProperty(video, 'duration', { configurable:true,value:100 });
+    video.currentTime=42; video.playbackRate=1.5; video.muted=true;
+    vi.spyOn(video,'load').mockImplementation(() => {
+      video.dispatchEvent(new Event('loadedmetadata')); video.dispatchEvent(new Event('canplay'));
+    });
+    await wrapper.get('.quality-trigger').trigger('click'); await flushPromises();
+    await wrapper.findAll('.quality-options button')[1]!.trigger('click'); await flushPromises();
+    expect(video.getAttribute('src')).toBe('/original.mp4'); expect(video.currentTime).toBe(42);
+    expect(video.playbackRate).toBe(1.5); expect(video.muted).toBe(true);
+    expect(wrapper.get('.quality-trigger').text()).toBe('原画'); wrapper.unmount();
   });
 });

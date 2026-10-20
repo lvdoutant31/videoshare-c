@@ -5,37 +5,32 @@
  */
 import { createRouter, createWebHistory } from 'vue-router';
 import { isAuthenticated } from '../api/http';
-import LoginView from '../views/LoginView.vue';
-import FeedView from '../views/FeedView.vue';
-import DiscoverView from '../views/DiscoverView.vue';
-import ProfileView from '../views/ProfileView.vue';
-import AuthorProfileView from '../views/AuthorProfileView.vue';
-import UserListPage from '../views/UserListPage.vue';
-import VideoListPage from '../views/VideoListPage.vue';
-import ShareInboxView from '../views/ShareInboxView.vue';
-import ShareLandingView from '../views/ShareLandingView.vue';
-import ShareRecipientsView from '../views/ShareRecipientsView.vue';
-import AccountSettingsView from '../views/AccountSettingsView.vue';
-
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
-    { path: '/', redirect: '/feed' },
-    { path: '/feed', name: 'feed', component: FeedView, meta: { public: true, keepAlive: true } },
-    { path: '/discover', name: 'discover', component: DiscoverView, meta: { public: true } },
-    { path: '/author/:userId', name: 'author', component: AuthorProfileView, meta: { public: true } },
-    { path: '/inbox', name: 'inbox', component: ShareInboxView, meta: { requiresAuth: true } },
-    { path: '/share/recipients', name: 'share-recipients', component: ShareRecipientsView, meta: { requiresAuth: true } },
-    { path: '/share/:shareCode', name: 'share-landing', component: ShareLandingView, meta: { public: true } },
-    { path: '/me', name: 'me', component: ProfileView, meta: { requiresAuth: true } },
-    { path: '/me/settings', name: 'me-settings', component: AccountSettingsView, meta: { requiresAuth: true } },
-    { path: '/me/favorites', name: 'me-favorites', component: VideoListPage, meta: { requiresAuth: true }, props: { kind: 'favorites' } },
-    { path: '/me/likes', name: 'me-likes', component: VideoListPage, meta: { requiresAuth: true }, props: { kind: 'likes' } },
-    { path: '/me/history', name: 'me-history', component: VideoListPage, meta: { requiresAuth: true }, props: { kind: 'history' } },
-    { path: '/me/following', name: 'me-following', component: UserListPage, meta: { requiresAuth: true }, props: { kind: 'following' } },
-    { path: '/me/followers', name: 'me-followers', component: UserListPage, meta: { requiresAuth: true }, props: { kind: 'followers' } },
-    { path: '/:pathMatch(.*)*', redirect: '/feed' },
+    { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
+    { path: '/', redirect: '/discover' },
+    { path: '/publish', name: 'publish', component: () => import('../views/PublishContentView.vue'), meta: { requiresAuth: true },
+      beforeEnter: to => typeof to.query.edit === 'string' && /^[1-9]\d*$/.test(to.query.edit)
+        ? { name: 'my-content-edit', params: { contentId: to.query.edit } } : true },
+    { path: '/content/:contentId', name: 'content-detail', component: () => import('../views/ContentDetailView.vue'), meta: { public: true } },
+    { path: '/feed', name: 'feed', component: () => import('../views/FeedView.vue'), meta: { public: true, keepAlive: true } },
+    { path: '/discover', name: 'discover', component: () => import('../views/DiscoverView.vue'), meta: { public: true } },
+    { path: '/author/:userId', name: 'author', component: () => import('../views/AuthorProfileView.vue'), meta: { public: true } },
+    { path: '/inbox', name: 'inbox', component: () => import('../views/ShareInboxView.vue'), meta: { requiresAuth: true } },
+    { path: '/share/recipients', name: 'share-recipients', component: () => import('../views/ShareRecipientsView.vue'), meta: { requiresAuth: true } },
+    { path: '/share/:shareCode', name: 'share-landing', component: () => import('../views/ShareLandingView.vue'), meta: { public: true } },
+    { path: '/me', name: 'me', component: () => import('../views/ProfileView.vue'), meta: { requiresAuth: true } },
+    { path: '/me/content', name: 'my-content', component: () => import('../views/MyContentView.vue'), meta: { requiresAuth: true } },
+    { path: '/me/content/:contentId/edit', name: 'my-content-edit', component: () => import('../views/PublishContentView.vue'), props: true, meta: { requiresAuth: true } },
+    { path: '/me/content/:contentId', name: 'my-content-detail', component: () => import('../views/MyContentDetailView.vue'), meta: { requiresAuth: true } },
+    { path: '/me/settings', name: 'me-settings', component: () => import('../views/AccountSettingsView.vue'), meta: { requiresAuth: true } },
+    { path: '/me/favorites', name: 'me-favorites', component: () => import('../views/VideoListPage.vue'), meta: { requiresAuth: true }, props: { kind: 'favorites' } },
+    { path: '/me/likes', name: 'me-likes', component: () => import('../views/VideoListPage.vue'), meta: { requiresAuth: true }, props: { kind: 'likes' } },
+    { path: '/me/history', name: 'me-history', component: () => import('../views/VideoListPage.vue'), meta: { requiresAuth: true }, props: { kind: 'history' } },
+    { path: '/me/following', name: 'me-following', component: () => import('../views/UserListPage.vue'), meta: { requiresAuth: true }, props: { kind: 'following' } },
+    { path: '/me/followers', name: 'me-followers', component: () => import('../views/UserListPage.vue'), meta: { requiresAuth: true }, props: { kind: 'followers' } },
+    { path: '/:pathMatch(.*)*', redirect: '/discover' },
   ],
 });
 
@@ -45,7 +40,7 @@ router.beforeEach((to) => {
     return { name: 'login', query: { redirect: to.fullPath } };
   }
   if (to.name === 'login' && isAuthenticated()) {
-    return { path: typeof to.query.redirect === 'string' ? to.query.redirect : '/feed' };
+    return { path: typeof to.query.redirect === 'string' ? to.query.redirect : '/discover' };
   }
   return true;
 });

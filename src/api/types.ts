@@ -1,5 +1,5 @@
 /**
- * 映流 C 端共享契约类型。
+ * videoshare C 端共享契约类型。
  * 依据：docs/API接口设计-短视频管理与播放系统.md §1 通用契约 与 §2 手机端 App API。
  * 字段以当前后端 AppVideoDtos 实际序列化结果为准，差异点见注释。
  */
@@ -45,6 +45,19 @@ export interface Author {
   following: boolean;
 }
 
+/** 作者公开资料；统计字段与后端 AuthorProfileView 的扁平响应保持一致。 */
+export interface AuthorProfile extends Author {
+  bio: string | null;
+  followingCount: number;
+  followerCount: number;
+  likeReceivedCount: number;
+  worksCount: number;
+}
+
+export interface AuthorSearchResult extends Author {
+  worksCount: number;
+}
+
 /** 封面资源 */
 export interface Cover {
   id: string;
@@ -59,12 +72,18 @@ export interface Tag {
   name: string;
 }
 
+export interface Category {
+  id: string;
+  name: string;
+}
+
 /** 互动统计 */
 export interface VideoStats {
   playCount: number;
   likeCount: number;
   favoriteCount: number;
   commentCount: number;
+  watchTimeMs: number;
 }
 
 /** 当前用户对视频的互动状态 */
@@ -83,10 +102,65 @@ export interface FeedItem {
   videoUrl: string | null;
   author: Author;
   cover: Cover | null;
+  categories?: Category[];
   tags: Tag[];
   stats: VideoStats;
   publishedAt: string;
   viewerState: ViewerState;
+}
+
+export interface PlaybackSource {
+  id: string;
+  label: string;
+  url: string;
+  width: number | null;
+  height: number | null;
+}
+
+export interface DiscoverSummary {
+  totalVideos: number;
+  totalWatchTimeMs: number;
+  effectivePlayCount: number;
+  averageWatchTimeMs: number;
+  todayNewCount: number;
+}
+
+export interface DiscoverCategory {
+  id: string;
+  name: string;
+  videoCount: number;
+}
+
+export interface DiscoverDurationStat {
+  code: string;
+  label: string;
+  sessionCount: number;
+}
+
+export type DiscoverSort = 'COMPREHENSIVE' | 'LATEST' | 'HOT';
+export interface DiscoverResponse {
+  summary: DiscoverSummary;
+  categories: DiscoverCategory[];
+  durationStats: DiscoverDurationStat[];
+  tags: Tag[];
+  ranking: FeedItem[];
+  videos: FeedItem[];
+  page: number;
+  hasMore: boolean;
+}
+
+/** 发现页热搜项，由真实推荐视频和互动数据生成。 */
+export interface TrendingItem {
+  videoId: string;
+  title: string;
+  coverUrl: string | null;
+  videoUrl: string | null;
+  heat: number;
+  playCount: number;
+  durationMs: number | null;
+  category: string;
+  tags: Tag[];
+  publishedAt: string;
 }
 
 // ---------- §2.1 登录与账号 ----------
@@ -143,6 +217,19 @@ export interface PublishCommentResult {
   id: string;
   status: 'NORMAL' | 'PENDING';
   message?: string;
+}
+
+export interface CommentReplyNotification {
+  id: string;
+  actor: { id: string; nickname: string; avatarUrl: string | null };
+  videoId: string;
+  videoTitle: string;
+  commentId: string;
+  replyToCommentId: string;
+  content: string;
+  sourceContent: string;
+  createdAt: string;
+  readAt: string | null;
 }
 
 // ---------- §2.5 历史 / 分享 / 举报 ----------

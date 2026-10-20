@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 /**
  * 移动端 E2E（基线二）：基于 mock 模式 + 本地 dev server。
- * 启动方式：先运行 `npm run dev`（vite，端口 5173），再 `npx playwright test`。
+ * 测试会自动启动 mock 模式的 Vite 服务。
  */
 export default defineConfig({
   testDir: './e2e',
@@ -10,7 +10,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 1,
   use: {
-    baseURL: 'http://localhost:5173/h5/',
+    baseURL: 'http://127.0.0.1:5173/videoshare/h5/',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     browserName: 'chromium',
@@ -18,6 +18,13 @@ export default defineConfig({
     deviceScaleFactor: 2,
     isMobile: true,
     hasTouch: true,
+  },
+  webServer: {
+    command: 'npm run dev -- --host 127.0.0.1',
+    url: 'http://127.0.0.1:5173/videoshare/h5/',
+    reuseExistingServer: true,
+    timeout: 120_000,
+    env: { VITE_USE_MOCK: 'false', VITE_ANALYTICS_ENABLED: 'false' },
   },
   projects: [{ name: 'mobile-chromium', use: {} }],
 });

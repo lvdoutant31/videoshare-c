@@ -7,7 +7,9 @@ import { router } from './router';
 import { setAuthRequiredHandler } from './api/http';
 import { useAuthStore } from './stores/auth';
 import { EVENT_NAMES, track } from './analytics';
+import './styles/vue-bits.css';
 import './styles/index.css';
+import './styles/community.css';
 
 const app = createApp(App);
 const pinia = createPinia();

@@ -85,6 +85,35 @@ test('两条推荐视频可连续滑动，末尾提示只在越界后出现', as
   await expect(page.getByText('没有更多了')).toBeHidden();
 });
 
+test('推荐流始终只让当前视频持有媒体源', async ({ page }) => {
+  await page.unroute('**/api/v1/app/feed/recommend?*');
+  await page.route('**/api/v1/app/feed/recommend?*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: apiData({
+      items: feedItems.map((item) => ({ ...item, videoUrl: '/videoshare/h5/media/flower.mp4' })),
+      nextCursor: null,
+    }),
+  }));
+
+  await page.goto('feed');
+  const players = page.locator('.feed-video');
+  await expect(players).toHaveCount(2);
+  await expect(page.locator('.feed-video[src]')).toHaveCount(1);
+  await expect(players.first()).toHaveAttribute('src', /flower\.mp4$/);
+  await expect(players.first()).not.toHaveAttribute('poster', /.+/);
+  await expect(players.nth(1)).not.toHaveAttribute('src', /.+/);
+  await expect(page.locator('.video-thumbnail video')).toHaveCount(0);
+  await expect.poll(() => players.first().evaluate((element) => element.paused)).toBe(false);
+
+  await swipe(page, -260);
+  await expect(page.locator('.feed-video[src]')).toHaveCount(1);
+  await expect(players.first()).not.toHaveAttribute('src', /.+/);
+  await expect(players.nth(1)).toHaveAttribute('src', /flower\.mp4$/);
+  await expect(page.locator('.player-hit-area').first()).toHaveAttribute('aria-label', '播放视频');
+  await expect.poll(() => players.nth(1).evaluate((element) => element.paused)).toBe(false);
+});
+
 test('关注与推荐列表可以双向切换', async ({ page }) => {
   const requests: string[] = [];
   await page.route('**/api/v1/app/feed/following?*', async (route) => {
@@ -130,13 +159,13 @@ test('视频按视口缩放且首页底栏使用浅色统一样式', async ({ pa
   expect(style.navBackground).toBe('rgb(255, 255, 255)');
 });
 
-test('视频支持暂停、继续、播放结束后重播和拖动进度条', async ({ page }) => {
+test('视频支持暂停、继续和拖动进度条', async ({ page }) => {
   await page.unroute('**/api/v1/app/feed/recommend?*');
   await page.route('**/api/v1/app/feed/recommend?*', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: apiData({
-      items: [{ ...feedItems[0], videoUrl: '/h5/media/flower.mp4' }],
+      items: [{ ...feedItems[0], videoUrl: '/videoshare/h5/media/flower.mp4' }],
       nextCursor: null,
     }),
   }));
@@ -157,16 +186,6 @@ test('视频支持暂停、继续、播放结束后重播和拖动进度条', as
   await tapVideoSurface(page);
   await expect.poll(() => video.evaluate((element) => element.paused)).toBe(false);
   await expect(surface).toHaveAttribute('aria-label', '暂停视频');
-
-  await video.evaluate((element) => {
-    element.pause();
-    element.currentTime = element.duration;
-    element.dispatchEvent(new Event('ended'));
-  });
-  await expect(surface).toHaveAttribute('aria-label', '重新播放');
-  await tapVideoSurface(page);
-  await expect.poll(() => video.evaluate((element) => element.currentTime)).toBeLessThan(2);
-  await expect.poll(() => video.evaluate((element) => element.paused)).toBe(false);
 
   const box = await progress.boundingBox();
   if (!box) throw new Error('progress bar not visible');
@@ -195,6 +214,8 @@ test('点赞、收藏、关注调用目标状态接口并同步同作者卡片',
   await page.goto('feed');
   await page.getByRole('button', { name: '点赞' }).first().click();
   await page.getByRole('button', { name: '收藏' }).first().click();
+  await expect(page.locator('.action-item .liked').first()).toHaveCSS('color', 'rgb(255, 48, 64)');
+  await expect(page.locator('.action-item .saved').first()).toHaveCSS('color', 'rgb(246, 195, 68)');
   await page.locator('.creator-anchor span').first().click();
   await expect.poll(() => writes).toEqual([
     'PUT /api/v1/app/videos/video-1/like',
@@ -204,10 +225,95 @@ test('点赞、收藏、关注调用目标状态接口并同步同作者卡片',
   await expect(page.locator('.creator-anchor span').nth(1)).toHaveText('✓');
 });
 
+test('首次点赞先更新本地计数，旧的零计数响应不会清掉 1', async ({ page }) => {
+  await page.unroute('**/api/v1/app/feed/recommend?*');
+  await page.route('**/api/v1/app/feed/recommend?*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: apiData({ items: [{ ...feedItems[0], stats: { ...feedItems[0].stats, likeCount: 0 } }], nextCursor: null }),
+  }));
+  let finishLike!: () => void;
+  const responsePending = new Promise<void>((resolve) => { finishLike = resolve; });
+  await page.route('**/api/v1/app/videos/video-1/like', async (route) => {
+    await responsePending;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: apiData({ active: true, count: 0 }) });
+  });
+
+  await page.goto('feed');
+  const likeButton = page.getByRole('button', { name: '点赞' }).first();
+  await likeButton.click();
+  await expect(likeButton.locator('small')).toHaveText('1');
+  await expect(page.locator('.action-item .liked').first()).toBeVisible();
+  finishLike();
+  await expect(likeButton.locator('small')).toHaveText('1');
+});
+
+test('分享只显示站内和复制链接，复制后直接打开完整正文', async ({ page }) => {
+  const article = {
+    ...feedItems[0],
+    title: '分享正文测试',
+    description: '<h2>正文标题</h2><p>正文可通过分享链接直接查看。</p>',
+    videoUrl: null,
+  };
+  await page.unroute('**/api/v1/app/feed/recommend?*');
+  await page.route('**/api/v1/app/feed/recommend?*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: apiData({ items: [article], nextCursor: null }),
+  }));
+  await page.route('**/api/v1/app/videos/video-1', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: apiData(article),
+  }));
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  await page.goto('feed');
+  await page.getByRole('button', { name: '分享', exact: true }).click();
+  await expect(page.getByText('微信', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('企业微信', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '复制链接' }).click();
+  const copiedUrl = await page.evaluate(() => navigator.clipboard.readText());
+  expect(new URL(copiedUrl).pathname).toMatch(/\/content\/video-1$/);
+
+  await page.goto(copiedUrl);
+  await expect(page.getByRole('heading', { name: '分享正文测试' })).toBeVisible();
+  await expect(page.locator('.rich-content')).toContainText('正文可通过分享链接直接查看');
+});
+
+test('图文图片预览显示关闭按钮，点击后可返回列表', async ({ page }) => {
+  const article = {
+    ...feedItems[0],
+    title: '图片预览测试',
+    description: '<p>可打开并退出图片预览。</p><img src="/fixture.jpg" />',
+    videoUrl: null,
+  };
+  await page.unroute('**/api/v1/app/feed/recommend?*');
+  await page.route('**/api/v1/app/feed/recommend?*', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: apiData({ items: [article], nextCursor: null }),
+  }));
+  await page.route('**/fixture.jpg', (route) => route.fulfill({
+    status: 200,
+    contentType: 'image/png',
+    body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pWQAAAAASUVORK5CYII=', 'base64'),
+  }));
+
+  await page.goto('feed');
+  await page.locator('.article-gallery img').click();
+  const closeButton = page.locator('.van-image-preview__close-icon');
+  await expect(closeButton).toBeVisible();
+  await closeButton.click();
+  await expect(page.locator('.van-image-preview')).toBeHidden();
+  await expect(page.getByText('图片预览测试')).toBeVisible();
+  await expect(page.locator('.feed-meta')).toHaveCSS('bottom', '135px');
+});
+
 test('收藏、点赞、关注、粉丝页面读取真实 App 查询接口', async ({ page }) => {
   const queried: string[] = [];
   const responses: Record<string, unknown> = {
-    '/api/v1/app/me/favorites': { items: [feedItems[0]], nextCursor: null },
+    '/api/v1/app/me/favorites': { items: [{ ...feedItems[0], videoUrl: '/videoshare/h5/media/flower.mp4' }], nextCursor: null },
     '/api/v1/app/me/likes': { items: [feedItems[1]], nextCursor: null },
     '/api/v1/app/me/following': [{ ...author, following: true }],
     '/api/v1/app/me/followers': [{ ...author, following: false }],
@@ -221,6 +327,10 @@ test('收藏、点赞、关注、粉丝页面读取真实 App 查询接口', asy
   for (const path of ['me/favorites', 'me/likes', 'me/following', 'me/followers']) {
     await page.goto(path);
     await expect(page.getByText('测试作者').first()).toBeVisible();
+    if (path === 'me/favorites') {
+      await expect(page.locator('.video-thumbnail video')).toHaveCount(0);
+      await expect(page.locator('.video-thumbnail img')).toHaveCount(0);
+    }
   }
   expect(queried).toEqual([
     '/api/v1/app/me/favorites',
@@ -261,7 +371,7 @@ test('关注和粉丝列表可在页内双向切换', async ({ page }) => {
   ]);
 });
 
-test('账号设置仅展示企业微信登录且不允许自助解绑', async ({ page }) => {
+test('账号设置展示账号登录且不显示企微入口', async ({ page }) => {
   await page.route('**/api/v1/app/me/agreements', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -269,7 +379,7 @@ test('账号设置仅展示企业微信登录且不允许自助解绑', async ({
   }));
 
   await page.goto('me/settings');
-  await expect(page.getByText('企业微信', { exact: true })).toBeVisible();
-  await expect(page.getByText('唯一登录方式 · 已绑定')).toBeVisible();
-  await expect(page.getByRole('button', { name: '解绑' })).toHaveCount(0);
+  await expect(page.getByText('账号登录', { exact: true })).toBeVisible();
+  await expect(page.getByText('手机号 + 密码')).toBeVisible();
+  await expect(page.getByText('企业微信', { exact: true })).toHaveCount(0);
 });

@@ -1,120 +1,129 @@
 <script setup lang="ts">
-/**
- * 登录页（M01）：企业微信是唯一登录方式。
- */
-import { onMounted, ref } from 'vue';
+import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { showToast } from 'vant';
-import { getWecomAuthorizeUrl } from '../api';
-import { isAuthenticated } from '../api/http';
+import { showDialog, showToast } from 'vant';
+import { register } from '../api';
 import { useAuthStore } from '../stores/auth';
-import { EVENT_NAMES, track } from '../analytics';
-import companyLogo from '../assets/yangtze-river-industry-logo.png';
+import authBackground from '../assets/auth-enterprise.png';
 
-const route = useRoute();
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 
-const WECOM_STATE_KEY = 'wecom-oauth-state';
-const WECOM_REDIRECT_KEY = 'wecom-oauth-redirect';
+const phone = ref('');
+const agreement = ref(false);
+const mode = ref<'login' | 'register' | 'forgot'>('login');
+const name = ref('');
+const password = ref('');
+const confirmPassword = ref('');
+const showPassword = ref(false);
+const submitting = ref(false);
 
-const wecomSubmitting = ref(false);
-async function wecomLogin() {
-  if (wecomSubmitting.value) return;
-  wecomSubmitting.value = true;
-  track(EVENT_NAMES.LOGIN_METHOD_SELECTED, { properties: { method: 'wecom' } });
-  try {
-    // 真实模式：跳转企微 OAuth 授权页；mock 模式：模拟回调后直接登录
-    const { authorizeUrl, state } = await getWecomAuthorizeUrl();
-    const isMock = authorizeUrl.includes('wecom=mock');
-    if (isMock) {
-      await auth.loginWithWecom('mock-code', state);
-      showToast('登录成功');
-      await redirectAfterLogin();
-    } else {
-      sessionStorage.setItem(WECOM_STATE_KEY, state);
-      sessionStorage.setItem(WECOM_REDIRECT_KEY, safeInternalRedirect(route.query.redirect));
-      location.href = authorizeUrl;
-    }
-  } catch (error) {
-    showToast(errorMessage(error, '企业微信授权暂不可用，请稍后重试'));
-  } finally {
-    wecomSubmitting.value = false;
-  }
+function validPhone(): boolean {
+  if (/^1\d{10}$/.test(phone.value.trim())) return true;
+  showToast('请输入正确的 11 位手机号');
+  return false;
 }
 
-function safeInternalRedirect(value: unknown): string {
-  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\\\')) return '/feed';
+function switchMode(next: typeof mode.value) {
+  mode.value = next;
+  password.value = ''; confirmPassword.value = ''; showPassword.value = false; agreement.value = false;
+}
+
+function safeRedirect(value: unknown): string {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/feed';
   try {
     const target = new URL(value, window.location.origin);
     return target.origin === window.location.origin ? `${target.pathname}${target.search}${target.hash}` : '/feed';
-  } catch {
-    return '/feed';
+  } catch { return '/feed'; }
+}
+
+async function submitForm() {
+  if (submitting.value || !validPhone()) return;
+  if (password.value.length < 8 || password.value.length > 64) return showToast('密码需为 8–64 位字符');
+  if (mode.value === 'register') {
+    if (!name.value.trim()) return showToast('请输入真实姓名');
+    if (password.value !== confirmPassword.value) return showToast('两次输入的密码不一致');
+    if (!agreement.value) return showToast('请先阅读并同意用户协议和隐私政策');
   }
-}
-
-async function redirectAfterLogin() {
-  const redirect = safeInternalRedirect(sessionStorage.getItem(WECOM_REDIRECT_KEY) ?? route.query.redirect);
-  sessionStorage.removeItem(WECOM_REDIRECT_KEY);
-  await router.replace(redirect);
-}
-
-function clearCallbackQuery() {
-  const url = new URL(window.location.href);
-  url.searchParams.delete('code');
-  url.searchParams.delete('state');
-  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  submitting.value = true;
+  try {
+    if (mode.value === 'register') {
+      await register(phone.value.trim(), password.value, name.value.trim(), '2026-08');
+      switchMode('login');
+      showToast('注册成功，请使用密码登录');
+      return;
+    }
+    await auth.login(phone.value.trim(), password.value);
+    showToast('登录成功');
+    await router.replace(safeRedirect(route.query.redirect));
+  } catch (error) {
+    showToast(errorMessage(error, '操作失败，请稍后重试'));
+  } finally {
+    submitting.value = false;
+  }
 }
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
-
-// 企微 OAuth 回调返回本页（?code=..&state=..）时完成登录
-onMounted(async () => {
-  const code = typeof route.query.code === 'string' ? route.query.code : null;
-  const state = typeof route.query.state === 'string' ? route.query.state : null;
-  if (code && state && isAuthenticated() === false) {
-    clearCallbackQuery();
-    const expectedState = sessionStorage.getItem(WECOM_STATE_KEY);
-    sessionStorage.removeItem(WECOM_STATE_KEY);
-    if (state !== expectedState) {
-      showToast('授权状态无效或已过期，请重新登录');
-      return;
-    }
-    try {
-      await auth.loginWithWecom(code, state);
-      await redirectAfterLogin();
-    } catch (error) {
-      showToast(errorMessage(error, '企微登录失败，请重新授权'));
-    }
-  }
-});
+function readAgreement(title: string) {
+  showDialog({ title, message: `尚未配置在线《${title}》正文，请联系系统管理员获取。`, confirmButtonText: '知道了' });
+}
 </script>
 
 <template>
-  <div class="login-screen">
-    <div class="login-grain" aria-hidden="true" />
-
-    <section class="login-brand">
-      <img class="login-company-logo" :src="companyLogo" alt="长江产业集团" />
-      <h1>VideoShare</h1>
+  <main class="auth-screen" :class="{ 'auth-register': mode === 'register' }" :style="{ '--auth-bg': `url(${authBackground})` }">
+    <section class="auth-brand" aria-label="湖北三环锻压设备有限公司">
+      <img :src="authBackground" alt="湖北三环锻压设备有限公司厂区与企业标识" />
+      <div class="brand-company"><h1>湖北三环锻压设备有限公司</h1><p>记录制造现场，分享身边的改变</p></div>
     </section>
 
-    <div class="login-panel">
-      <button class="wecom-login-btn" :disabled="wecomSubmitting" :aria-busy="wecomSubmitting" @click="wecomLogin">
-        <van-icon name="friends-o" />
-        <span>{{ wecomSubmitting ? '正在授权...' : '使用企业微信登录' }}</span>
-      </button>
+    <section class="auth-panel" aria-live="polite">
+      <header class="auth-panel-header">
+        <p class="auth-overline">湖北三环锻压设备有限公司</p>
+        <h2>{{ mode === 'login' ? '账号登录' : mode === 'register' ? '注册账号' : '忘记密码' }}</h2>
+        <p>{{ mode === 'register' ? '创建账号，参与交流与分享' : '登录后参与交流与分享' }}</p>
+      </header>
 
-      <div class="login-security-note">
-        <van-icon name="shield-o" />
-        <span>仅限企业成员登录</span>
-      </div>
-    </div>
-
-    <p class="login-agreement">
-      登录即代表你同意 <a href="javascript:void(0)">《用户协议》</a> 和 <a href="javascript:void(0)">《隐私政策》</a>
-    </p>
-  </div>
+      <section v-if="mode === 'forgot'" class="auth-reset-note">
+        <h3>请联系系统管理员</h3><p>密码重置暂由管理员人工处理</p>
+        <button class="auth-primary" type="button" @click="switchMode('login')">返回登录</button>
+      </section>
+      <form v-else class="auth-form" @submit.prevent="submitForm">
+          <label v-if="mode === 'register'" class="auth-field">
+            <span>真实姓名</span><span class="auth-input-wrap"><van-icon name="user-o" /><input :disabled="submitting" v-model="name" maxlength="30" autocomplete="name" placeholder="请输入真实姓名" /></span>
+          </label>
+          <label class="auth-field">
+            <span>手机号</span>
+            <span class="auth-input-wrap">
+              <van-icon name="phone-o" />
+              <input :disabled="submitting" v-model="phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="请输入手机号" />
+            </span>
+          </label>
+          <label class="auth-field">
+            <span>密码</span>
+            <span class="auth-input-wrap">
+              <van-icon name="lock" />
+              <input :disabled="submitting" v-model="password" :type="showPassword ? 'text' : 'password'" maxlength="64" :autocomplete="mode === 'register' ? 'new-password' : 'current-password'" :placeholder="mode === 'register' ? '至少 8 位字符' : '请输入密码'" />
+              <button class="password-toggle" type="button" :aria-label="showPassword ? '隐藏密码' : '显示密码'" @click="showPassword = !showPassword"><van-icon :name="showPassword ? 'eye-o' : 'closed-eye'" /></button>
+            </span>
+          </label>
+          <label v-if="mode === 'register'" class="auth-field">
+            <span>确认密码</span><span class="auth-input-wrap"><van-icon name="lock" /><input :disabled="submitting" v-model="confirmPassword" type="password" maxlength="64" autocomplete="new-password" placeholder="请再次输入密码" /></span>
+          </label>
+          <div v-if="mode === 'login'" class="auth-options"><span /><button type="button" :disabled="submitting" @click="switchMode('forgot')">忘记密码</button></div>
+          <label v-if="mode === 'register'" class="auth-agreement-check">
+            <input v-model="agreement" type="checkbox" />
+            <span>我已阅读并同意 <a href="#user-agreement" @click.prevent="readAgreement('用户协议')">《用户协议》</a> 和 <a href="#privacy-policy" @click.prevent="readAgreement('隐私政策')">《隐私政策》</a></span>
+          </label>
+          <button class="auth-primary" type="submit" :disabled="submitting" :aria-busy="submitting">
+            {{ submitting ? '请稍候...' : mode === 'register' ? '注册' : '登录' }}
+          </button>
+      </form>
+      <p v-if="mode === 'login'" class="auth-switch">还没有账号？<button type="button" :disabled="submitting" @click="switchMode('register')">立即注册</button></p>
+      <p v-else-if="mode === 'register'" class="auth-switch">已有账号？<button type="button" :disabled="submitting" @click="switchMode('login')">返回登录</button></p>
+    </section>
+    <footer class="auth-footer">© 2026 湖北三环锻压设备有限公司 · 安全访问</footer>
+  </main>
 </template>

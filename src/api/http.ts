@@ -44,6 +44,7 @@ interface RequestOptions {
   /** 需要幂等写入时携带，服务端据此去重 */
   idempotencyKey?: string;
   signal?: AbortSignal;
+  onUploadProgress?: (percent: number) => void;
 }
 
 /** 业务码需登录取会话的场景（错误码 → 需跳转登录） */
@@ -60,12 +61,30 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const token = tokenStore.get();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const multipart = body instanceof FormData;
+  if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json';
 
-  const response = await fetch(`${BASE_URL}${API_PREFIX}${path}`, {
+  const url = `${BASE_URL}${API_PREFIX}${path}`;
+  const response = options.onUploadProgress && multipart ? await new Promise<Response>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    xhr.open(method, url);
+    xhr.withCredentials = true;
+    Object.entries(headers).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable && event.total > 0) options.onUploadProgress!(Math.round(event.loaded / event.total * 100));
+    };
+    xhr.onload = () => resolve(new Response(xhr.status === 204 ? null : xhr.responseText, { status: xhr.status }));
+    xhr.onerror = () => reject(new Error('网络异常，上传失败，请检查连接后重试'));
+    xhr.onabort = () => reject(new DOMException('上传已取消', 'AbortError'));
+    xhr.onloadend = () => signal?.removeEventListener('abort', abort);
+    if (signal?.aborted) { reject(new DOMException('上传已取消', 'AbortError')); return; }
+    signal?.addEventListener('abort', abort, { once: true });
+    xhr.send(body as FormData);
+  }) : await fetch(url, {
     method,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: multipart ? body : body !== undefined ? JSON.stringify(body) : undefined,
     signal,
     credentials: 'include',
   });

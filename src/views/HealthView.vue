@@ -18,7 +18,7 @@ async function checkHealth() {
 
 <template>
   <main class="screen">
-    <h1>映流</h1>
+    <h1>videoshare</h1>
     <p>手机端工程基线</p>
     <button type="button" @click="checkHealth">检查服务</button>
     <p v-if="state === 'ready'">{{ service }} 已就绪</p>

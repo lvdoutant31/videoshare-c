@@ -2,7 +2,7 @@
 /**
  * 账号设置页（PRD 手机端 §1）：资料编辑、企微身份状态、协议同意、账号注销申请。
  */
-import { onMounted, reactive, ref } from 'vue';
+import { onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { showConfirmDialog, showToast } from 'vant';
 import { acceptAgreement, getAgreements, requestCancellation } from '../api';
@@ -16,11 +16,13 @@ const draft = reactive({ nickname: '', bio: '' });
 const saving = ref(false);
 const agreements = ref<AgreementInfo[]>([]);
 
+watch(() => auth.user, (user) => {
+  if (!user) return;
+  draft.nickname = user.nickname;
+  draft.bio = user.bio ?? '';
+}, { immediate: true });
+
 onMounted(() => {
-  if (auth.user) {
-    draft.nickname = auth.user.nickname;
-    draft.bio = auth.user.bio ?? '';
-  }
   getAgreements()
     .then((list) => {
       agreements.value = list;
@@ -31,7 +33,7 @@ onMounted(() => {
 async function saveProfile() {
   const nickname = draft.nickname.trim();
   if (!nickname) {
-    showToast('昵称不能为空');
+    showToast('姓名不能为空');
     return;
   }
   saving.value = true;
@@ -74,35 +76,42 @@ async function cancelAccount() {
     showToast('提交失败，请稍后重试');
   }
 }
+
+async function logout() {
+  try { await showConfirmDialog({ title: '退出登录', message: '确定退出当前账号吗？' }); } catch { return; }
+  await auth.logout();
+  showToast('已退出登录');
+  router.replace({ name: 'login' });
+}
 </script>
 
 <template>
   <div class="page light-page">
     <header class="profile-nav">
       <button aria-label="返回" @click="router.back()"><van-icon name="arrow-left" /></button>
-      <strong>账号设置</strong>
-      <button aria-label="更多"><van-icon name="ellipsis" /></button>
+      <strong>设置</strong>
+      <span />
     </header>
 
     <div class="settings-scroll">
-      <section class="settings-section">
+      <form class="settings-section" @submit.prevent="saveProfile">
         <h3>个人资料</h3>
         <div class="field-row">
-          <label>昵称</label>
-          <input v-model="draft.nickname" maxlength="30" placeholder="请输入昵称" />
+          <label for="profile-name">姓名</label>
+          <input id="profile-name" v-model="draft.nickname" maxlength="30" autocomplete="name" placeholder="请输入姓名" />
         </div>
         <div class="field-row">
-          <label>简介</label>
-          <textarea v-model="draft.bio" rows="2" maxlength="100" placeholder="介绍一下自己（选填）" />
+          <label for="profile-bio">简介</label>
+          <textarea id="profile-bio" v-model="draft.bio" rows="2" maxlength="100" placeholder="介绍一下自己（选填）" />
         </div>
-        <button class="primary-btn" :disabled="saving" @click="saveProfile">{{ saving ? '保存中...' : '保存资料' }}</button>
-      </section>
+        <button class="primary-btn" type="submit" :disabled="saving">{{ saving ? '保存中...' : '保存资料' }}</button>
+      </form>
 
       <section class="settings-section">
         <h3>登录方式</h3>
         <div class="field-row static">
-          <span>企业微信</span>
-          <small>{{ auth.user?.wecomBound ? '唯一登录方式 · 已绑定' : '身份状态异常' }}</small>
+          <span>账号登录</span>
+          <small>手机号 + 密码</small>
         </div>
       </section>
 
@@ -115,8 +124,14 @@ async function cancelAccount() {
         </div>
       </section>
 
+      <section class="settings-section settings-links">
+        <button @click="router.push({ name: 'me-following' })"><span>我的关注</span><van-icon name="arrow" aria-hidden="true" /></button>
+        <button @click="router.push({ name: 'me-followers' })"><span>我的粉丝</span><van-icon name="arrow" aria-hidden="true" /></button>
+        <button @click="router.push({ name: 'inbox' })"><span>消息</span><van-icon name="arrow" aria-hidden="true" /></button>
+      </section>
       <section class="settings-section danger-zone">
         <h3>账号</h3>
+        <button class="logout-btn" @click="logout">退出登录</button>
         <button class="danger-btn" @click="cancelAccount">申请注销账号</button>
       </section>
     </div>
@@ -141,4 +156,6 @@ async function cancelAccount() {
 .link-btn { color: var(--indigo); font-size: 13px; }
 .danger-zone { margin-bottom: 24px; }
 .danger-btn { width: 100%; height: 44px; margin-top: 8px; border-radius: 8px; color: #d43c3c; background: #fdecec; font-size: 14px; }
+.settings-links button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 46px; border-bottom: 1px solid #f4f4f6; font-size: 14px; }
+.logout-btn { width:100%; min-height:48px; border:1px solid var(--line); border-radius:8px; color:var(--text-strong); font-size:14px; }
 </style>

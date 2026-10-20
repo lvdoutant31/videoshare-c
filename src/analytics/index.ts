@@ -25,10 +25,20 @@ export const EVENT_NAMES = {
   SHARE_CARD_OPENED: 'share_card_opened',
   REPORT_SUBMITTED: 'report_submitted',
   PROFILE_VIEWED: 'profile_viewed',
+  SEARCH_SUBMITTED: 'search_submitted',
+  SEARCH_RESULTS: 'search_results_loaded',
+  SEARCH_EMPTY: 'search_empty',
+  SEARCH_FAILED: 'search_failed',
+  SEARCH_RESULT_CLICKED: 'search_result_clicked',
+  PUBLISH_STARTED: 'publish_started',
+  PUBLISH_SUBMITTED: 'publish_submitted',
+  PUBLISH_FAILED: 'publish_failed',
 } as const;
 export type EventName = (typeof EVENT_NAMES)[keyof typeof EVENT_NAMES];
 
 export interface AnalyticsEvent {
+  eventId: string;
+  playSessionId?: string;
   eventName: EventName;
   occurredAt: string;
   anonymousSessionId: string;
@@ -44,6 +54,7 @@ const SESSION_KEY = 'yingliu.anonymous.session';
 const CLIENT_VERSION = '0.1.0';
 const BATCH_LIMIT = 50;
 const FLUSH_INTERVAL_MS = 10_000;
+const ANALYTICS_ENABLED = import.meta.env.VITE_ANALYTICS_ENABLED !== 'false';
 
 let sessionId = localStorage.getItem(SESSION_KEY) ?? '';
 if (!sessionId) {
@@ -53,6 +64,7 @@ if (!sessionId) {
 
 const queue: AnalyticsEvent[] = [];
 let flushTimer: ReturnType<typeof setInterval> | null = null;
+let flushing = false;
 
 function networkType(): string | undefined {
   const nav = navigator as Navigator & { connection?: { effectiveType?: string } };
@@ -61,8 +73,9 @@ function networkType(): string | undefined {
 }
 
 /** 采集一条事件（内存队列，节流后批量上报） */
-export function track(eventName: EventName, opts: { videoId?: string; objectId?: string; pageSource?: string; properties?: Record<string, unknown> } = {}): void {
+export function track(eventName: EventName, opts: { playSessionId?: string; videoId?: string; objectId?: string; pageSource?: string; properties?: Record<string, unknown> } = {}): void {
   const event: AnalyticsEvent = {
+    eventId: createUuid(),
     eventName,
     occurredAt: new Date().toISOString(),
     anonymousSessionId: sessionId,
@@ -70,6 +83,10 @@ export function track(eventName: EventName, opts: { videoId?: string; objectId?:
     networkType: networkType(),
     ...opts,
   };
+  if (!ANALYTICS_ENABLED) {
+    if (import.meta.env.DEV) console.debug('[analytics disabled]', event.eventName);
+    return;
+  }
   queue.push(event);
   if (queue.length >= BATCH_LIMIT) flush();
   startFlushTimer();
@@ -81,7 +98,8 @@ export function track(eventName: EventName, opts: { videoId?: string; objectId?:
 
 /** 立即批量上报（POST /analytics/events/batch，mock 模式仅清空队列） */
 export async function flush(): Promise<void> {
-  if (queue.length === 0) return;
+  if (!ANALYTICS_ENABLED || flushing || queue.length === 0) return;
+  flushing = true;
   const events = queue.splice(0, BATCH_LIMIT);
   try {
     const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? ''}/api/v1/analytics/events/batch`, {
@@ -91,11 +109,12 @@ export async function flush(): Promise<void> {
       keepalive: true,
     });
     if (!response.ok) {
-      // 失败丢弃（不阻塞业务），生产可加本地重试缓存
-      queue.unshift(...events.slice(0, 10));
+      queue.unshift(...events);
     }
   } catch {
-    queue.unshift(...events.slice(0, 10));
+    queue.unshift(...events);
+  } finally {
+    flushing = false;
   }
 }
 

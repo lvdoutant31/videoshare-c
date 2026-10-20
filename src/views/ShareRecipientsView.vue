@@ -7,6 +7,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { showToast } from 'vant';
 import { getRecentRecipients, searchRecipients, sendInternalShare } from '../api';
 import type { ShareRecipient } from '../api/types';
+import AvatarImage from '../components/AvatarImage.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -98,7 +99,7 @@ function done() {
     <header class="profile-nav">
       <button aria-label="返回" @click="router.back()"><van-icon name="arrow-left" /></button>
       <strong>选择接收人</strong>
-      <button aria-label="更多"><van-icon name="ellipsis" /></button>
+      <span aria-hidden="true" />
     </header>
 
     <div class="recipient-search">
@@ -115,16 +116,16 @@ function done() {
         <section v-if="!query.trim() && recent.length" class="recipient-section">
           <h3>最近转发</h3>
           <article v-for="user in recent" :key="user.id" class="user-list-item" @click="toggle(user)">
-            <img :src="user.avatarUrl ?? ''" alt="头像" />
-            <div class="copy"><strong>{{ user.nickname }}</strong><small>映流号: {{ user.id }}</small></div>
+            <AvatarImage :src="user.avatarUrl" alt="头像" />
+            <div class="copy"><strong>{{ user.nickname }}</strong><small>videoshare号: {{ user.id }}</small></div>
             <span class="check" :class="{ on: selected.has(user.id) }"><van-icon name="success" /></span>
           </article>
         </section>
         <section v-else-if="query.trim()" class="recipient-section">
           <h3>搜索结果</h3>
           <article v-for="user in results" :key="user.id" class="user-list-item" @click="toggle(user)">
-            <img :src="user.avatarUrl ?? ''" alt="头像" />
-            <div class="copy"><strong>{{ user.nickname }}</strong><small>映流号: {{ user.id }}</small></div>
+            <AvatarImage :src="user.avatarUrl" alt="头像" />
+            <div class="copy"><strong>{{ user.nickname }}</strong><small>videoshare号: {{ user.id }}</small></div>
             <span class="check" :class="{ on: selected.has(user.id) }"><van-icon name="success" /></span>
           </article>
           <div v-if="!results.length" class="empty-state"><van-icon name="search" /><p>未找到相关用户</p></div>

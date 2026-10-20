@@ -3,10 +3,54 @@
  * mock 模式保留企业微信授权夹具；真实模式走 /app/auth/*。
  */
 import { request } from './http';
+import type { PlaybackSource } from './types';
+
+export function getVideoSources(videoId: string): Promise<PlaybackSource[]> {
+  if (USE_MOCK) {
+    const item = mockFeed.find(item => item.id === videoId);
+    return Promise.resolve(item?.videoUrl ? [{ id: 'original', label: '原画', url: item.videoUrl, width: null, height: null }] : []);
+  }
+  return request(`/app/videos/${encodeURIComponent(videoId)}/sources`);
+}
 import { createUuid } from '../utils/uuid';
 import { USE_MOCK, delay, paginate } from './mock';
 import { mockFeed, mockHistory, mockReportReasons, mockShareInbox, mockUsers } from './mock/data';
-import type { AgreementInfo, AgreementType, AppLoginResult, AppUser, Author, CursorPage, FeedItem, HistoryItem, InternalShareResult, ReportReason, ShareInboxItem, ShareRecipient, WecomAuthorizeResult } from './types';
+import type { AgreementInfo, AgreementType, AppLoginResult, AppUser, Author, AuthorProfile, CursorPage, DiscoverResponse, FeedItem, HistoryItem, InternalShareResult, ReportReason, ShareInboxItem, ShareRecipient, TrendingItem, WecomAuthorizeResult } from './types';
+
+function cursorQuery(cursor: string | null, limit: number, extra: Record<string, string> = {}): string {
+  const params = new URLSearchParams({ ...extra, limit: String(limit) });
+  if (cursor?.trim()) params.set('cursor', cursor);
+  return params.toString();
+}
+
+const mockLoginResult = (method: string): AppLoginResult => ({
+  accessToken: `mock-${method}-token`,
+  expiresIn: 604800,
+  user: { ...mockUsers[0] },
+});
+
+/** 手机号与密码登录，沿用现有 App 会话。 */
+export function passwordLogin(phone: string, password: string): Promise<AppLoginResult> {
+  if (USE_MOCK) return delay(500).then(() => mockLoginResult('password'));
+  return request('/app/auth/password/login', { method: 'POST', body: { phone, password } });
+}
+
+export function register(phone: string, password: string, name: string, agreementVersion: string): Promise<void> {
+  if (USE_MOCK) return delay(300).then(() => undefined);
+  return request('/app/auth/register', { method: 'POST', body: { phone, password, name, agreementVersion } });
+}
+
+/** 发送手机号验证码。 */
+export function sendPhoneCode(phone: string): Promise<{ expiresIn: number }> {
+  if (USE_MOCK) return delay(300).then(() => ({ expiresIn: 60 }));
+  return request('/app/auth/phone/send-code', { method: 'POST', body: { phone } });
+}
+
+/** 手机号验证码登录；新手机号首次登录时由服务端自动注册。 */
+export function phoneLogin(phone: string, code: string, agreementVersion: string): Promise<AppLoginResult> {
+  if (USE_MOCK) return delay(500).then(() => mockLoginResult('phone'));
+  return request('/app/auth/phone/login', { method: 'POST', body: { phone, code, agreementVersion } });
+}
 
 /** 当前用户资料 */
 export function getMe(): Promise<AppUser> {
@@ -37,7 +81,7 @@ export function getRecommendFeed(cursor: string | null, limit = 5): Promise<Curs
   if (USE_MOCK) {
     return delay(350).then(() => paginate(mockFeed, cursor, limit));
   }
-  return request(`/app/feed/recommend?cursor=${cursor ?? ''}&limit=${limit}`);
+  return request(`/app/feed/recommend?${cursorQuery(cursor, limit)}`);
 }
 
 /** 当前用户关注作者的视频流 */
@@ -45,7 +89,39 @@ export function getFollowingFeed(cursor: string | null, limit = 5): Promise<Curs
   if (USE_MOCK) {
     return delay(350).then(() => paginate(mockFeed.filter((video) => video.author.following), cursor, limit));
   }
-  return request(`/app/feed/following?cursor=${cursor ?? ''}&limit=${limit}`);
+  return request(`/app/feed/following?${cursorQuery(cursor, limit)}`);
+}
+
+/** 发现页热搜：复用真实推荐流，按真实播放和互动数据计算热度。 */
+export async function getTrendingVideos(limit = 5): Promise<TrendingItem[]> {
+  const page = await getRecommendFeed(null, Math.max(limit, 20));
+  return page.items
+    .map((video) => ({
+      videoId: video.id,
+      title: video.title,
+      coverUrl: video.cover?.coverUrl ?? null,
+      videoUrl: video.videoUrl,
+      heat: video.stats.playCount + video.stats.likeCount * 10 + video.stats.favoriteCount * 6 + video.stats.commentCount * 4,
+      playCount: video.stats.playCount,
+      durationMs: video.durationMs,
+      category: video.tags[0]?.name ?? '未分类',
+      tags: video.tags,
+      publishedAt: video.publishedAt,
+    }))
+    .sort((left, right) => right.heat - left.heat)
+    .slice(0, limit);
+}
+
+/** 发现页：由后端统一返回真实统计口径、排行和组合筛选结果。 */
+export function getDiscover(params: { keyword?: string; categoryId?: string; tagId?: string; limit?: number; page?: number; sort?: import('./types').DiscoverSort; contentType?: 'ALL' | 'VIDEO' | 'ARTICLE' } = {}): Promise<DiscoverResponse> {
+  const query = new URLSearchParams({ limit: String(params.limit ?? 24) });
+  if (params.keyword?.trim()) query.set('keyword', params.keyword.trim());
+  if (params.categoryId) query.set('categoryId', params.categoryId);
+  if (params.tagId) query.set('tagId', params.tagId);
+  if (params.page) query.set('page', String(params.page));
+  if (params.sort) query.set('sort', params.sort);
+  if (params.contentType && params.contentType !== 'ALL') query.set('contentType', params.contentType);
+  return request(`/app/discover?${query.toString()}`);
 }
 
 export function getVideoDetail(videoId: string): Promise<FeedItem> {
@@ -59,7 +135,12 @@ export function getVideoDetail(videoId: string): Promise<FeedItem> {
   return request(`/app/videos/${videoId}`);
 }
 
-export function getAuthorProfile(userId: string): Promise<Author & { bio: string | null; stats: { likeReceivedCount: number; followingCount: number; followerCount: number } }> {
+export function getContentDetail(contentId: string): Promise<FeedItem> {
+  if (USE_MOCK) return getVideoDetail(contentId);
+  return request(`/app/content/${contentId}`);
+}
+
+export function getAuthorProfile(userId: string): Promise<AuthorProfile> {
   if (USE_MOCK) {
     return delay(250).then(() => {
       const user = mockUsers.find((u) => u.id === userId);
@@ -70,18 +151,37 @@ export function getAuthorProfile(userId: string): Promise<Author & { bio: string
         avatarUrl: user.avatarUrl,
         following: false,
         bio: user.bio,
-        stats: { likeReceivedCount: user.likeReceivedCount, followingCount: user.followingCount, followerCount: user.followerCount },
+        likeReceivedCount: user.likeReceivedCount,
+        followingCount: user.followingCount,
+        followerCount: user.followerCount,
+        worksCount: mockFeed.filter(item => item.author.id === userId).length,
       };
     });
   }
-  return request(`/app/users/${userId}`);
+  return request<Omit<AuthorProfile, 'following'> & { following?: boolean }>(`/app/users/${userId}`)
+    .then((profile) => ({ ...profile, following: profile.following ?? false }));
 }
 
 export function getAuthorVideos(userId: string, cursor: string | null, limit = 9): Promise<CursorPage<FeedItem>> {
   if (USE_MOCK) {
     return delay(300).then(() => paginate(mockFeed.filter((v) => v.author.id === userId), cursor, limit));
   }
-  return request(`/app/users/${userId}/videos?cursor=${cursor ?? ''}&limit=${limit}`);
+  return request(`/app/users/${userId}/videos?${cursorQuery(cursor, limit)}`);
+}
+
+export function searchAuthors(keyword: string, cursor: string | null = null, limit = 20): Promise<CursorPage<import('./types').AuthorSearchResult>> {
+  if (USE_MOCK) {
+    const query = keyword.trim().toLowerCase();
+    return delay(200).then(() => paginate(mockUsers.filter(user => query && (user.nickname.toLowerCase().includes(query) || user.id.includes(query)))
+      .map(user => ({ id: user.id, nickname: user.nickname, avatarUrl: user.avatarUrl, following: false,
+        worksCount: mockFeed.filter(item => item.author.id === user.id).length })), cursor, limit));
+  }
+  return request(`/app/users?${cursorQuery(cursor, limit, { keyword: keyword.trim() })}`);
+}
+
+export function getAuthorLikedVideos(userId: string, cursor: string | null, limit = 20): Promise<CursorPage<FeedItem>> {
+  if (USE_MOCK) return delay(200).then(() => ({ items: [], nextCursor: null }));
+  return request(`/app/users/${encodeURIComponent(userId)}/likes?${cursorQuery(cursor, limit)}`);
 }
 
 /** 当前用户收藏的视频 */
@@ -89,7 +189,7 @@ export function getFavoriteVideos(cursor: string | null = null, limit = 20): Pro
   if (USE_MOCK) {
     return delay(250).then(() => paginate(mockFeed.filter((video) => video.viewerState.favorited), cursor, limit));
   }
-  return request(`/app/me/favorites?cursor=${cursor ?? ''}&limit=${limit}`);
+  return request(`/app/me/favorites?${cursorQuery(cursor, limit)}`);
 }
 
 /** 当前用户点赞的视频 */
@@ -97,7 +197,7 @@ export function getLikedVideos(cursor: string | null = null, limit = 20): Promis
   if (USE_MOCK) {
     return delay(250).then(() => paginate(mockFeed.filter((video) => video.viewerState.liked), cursor, limit));
   }
-  return request(`/app/me/likes?cursor=${cursor ?? ''}&limit=${limit}`);
+  return request(`/app/me/likes?${cursorQuery(cursor, limit)}`);
 }
 
 /** 当前用户的关注列表 */
@@ -131,7 +231,8 @@ export function setLike(videoId: string, active: boolean): Promise<{ active: boo
   if (USE_MOCK) {
     return delay(180).then(() => {
       const video = mockFeed.find((v) => v.id === videoId);
-      return { active, count: video ? Math.max(0, video.stats.likeCount + (active ? 1 : -1)) : 0 };
+      // FeedView has already applied the target state optimistically to shared mock data.
+      return { active, count: video?.stats.likeCount ?? 0 };
     });
   }
   return request(`/app/videos/${videoId}/like`, { method: 'PUT', body: { active }, idempotencyKey: createUuid() });
@@ -181,7 +282,7 @@ export function getHistory(cursor: string | null = null, limit = 20): Promise<{ 
   if (USE_MOCK) {
     return delay(250).then(() => paginate(historyState, cursor, limit));
   }
-  return request(`/app/me/history?cursor=${cursor ?? ''}&limit=${limit}`);
+  return request(`/app/me/history?${cursorQuery(cursor, limit)}`);
 }
 
 /** 清空观看历史 */

@@ -9,6 +9,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { showToast } from 'vant';
 import { mockFeed } from '../api/mock/data';
 import { EVENT_NAMES, track } from '../analytics';
+import { resolveCoverUrl } from '../utils/media';
 
 const route = useRoute();
 const router = useRouter();
@@ -35,12 +36,12 @@ function openApp() {
   <div class="landing-screen">
     <template v-if="!notFound">
       <div class="landing-video">
-        <video :src="video.videoUrl ?? ''" :poster="video.cover?.coverUrl ?? ''" controls playsinline webkit-playsinline />
+        <video :src="video.videoUrl ?? ''" :poster="resolveCoverUrl(video.cover?.coverUrl)" controls playsinline webkit-playsinline />
       </div>
       <div class="landing-info">
         <h1>{{ video.title }}</h1>
         <p>{{ video.description }}</p>
-        <button class="landing-open" @click="openApp">打开映流继续观看</button>
+        <button class="landing-open" @click="openApp">打开 videoshare 继续观看</button>
       </div>
     </template>
     <div v-else class="landing-missing">

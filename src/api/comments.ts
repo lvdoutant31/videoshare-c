@@ -5,7 +5,7 @@ import { request } from './http';
 import { createUuid } from '../utils/uuid';
 import { USE_MOCK, delay, paginate } from './mock';
 import { mockCommentsFor } from './mock/data';
-import type { CommentItem, CommentSort, CursorPage, PublishCommentResult } from './types';
+import type { CommentItem, CommentReplyNotification, CommentSort, CursorPage, PublishCommentResult } from './types';
 
 /** 一级评论列表（sort=HOT|LATEST，游标分页） */
 export function getComments(videoId: string, sort: CommentSort = 'HOT', cursor: string | null = null, limit = 20): Promise<CursorPage<CommentItem>> {
@@ -16,7 +16,9 @@ export function getComments(videoId: string, sort: CommentSort = 'HOT', cursor: 
       return paginate(sorted, cursor, limit);
     });
   }
-  return request(`/app/videos/${videoId}/comments?sort=${sort}&cursor=${cursor ?? ''}&limit=${limit}`);
+  const params = new URLSearchParams({ sort, limit: String(limit) });
+  if (cursor?.trim()) params.set('cursor', cursor);
+  return request(`/app/videos/${videoId}/comments?${params.toString()}`);
 }
 
 /** 二级回复（时间正序） */
@@ -40,6 +42,16 @@ export function publishComment(videoId: string, content: string, replyToCommentI
     }));
   }
   return request(`/app/videos/${videoId}/comments`, { method: 'POST', body: { content, replyToCommentId } });
+}
+
+export function getCommentReplyNotifications(cursor: string | null = null, limit = 20): Promise<CursorPage<CommentReplyNotification>> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor?.trim()) params.set('cursor', cursor);
+  return request(`/app/comment-notifications?${params.toString()}`);
+}
+
+export function markCommentReplyNotificationRead(notificationId: string): Promise<void> {
+  return request(`/app/comment-notifications/${notificationId}/read`, { method: 'PUT' });
 }
 
 /** 点赞评论（目标状态） */

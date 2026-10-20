@@ -7,6 +7,8 @@ import { useRouter } from 'vue-router';
 import { showToast } from 'vant';
 import { getFollowers, getFollowing, setFollow } from '../api';
 import type { Author } from '../api/types';
+import AvatarImage from '../components/AvatarImage.vue';
+import { pendingInteractions } from '../utils/pendingInteractions';
 
 const props = defineProps<{ kind: 'following' | 'followers' }>();
 const router = useRouter();
@@ -38,15 +40,19 @@ async function loadUsers() {
 watch(() => props.kind, loadUsers, { immediate: true });
 
 async function toggleFollow(user: Author) {
+  const key = `follow:${user.id}`;
+  if (pendingInteractions.has(key)) return;
+  pendingInteractions.add(key);
   const target = !user.following;
   const before = user.following;
   user.following = target;
   try {
-    await setFollow(user.id, target);
+    const result = await setFollow(user.id, target);
+    user.following = result.active;
   } catch {
     user.following = before;
     showToast('操作失败');
-  }
+  } finally { pendingInteractions.delete(key); }
 }
 
 function openAuthor(id: string) {
@@ -64,7 +70,7 @@ function switchKind(kind: 'following' | 'followers') {
     <header class="profile-nav">
       <button aria-label="返回" @click="router.back()"><van-icon name="arrow-left" /></button>
       <strong>{{ title }}</strong>
-      <button aria-label="更多"><van-icon name="ellipsis" /></button>
+      <span aria-hidden="true" />
     </header>
     <div class="profile-scroll">
       <nav class="user-list-tabs" aria-label="关注关系">
@@ -81,9 +87,10 @@ function switchKind(kind: 'following' | 'followers') {
       </nav>
       <div v-if="users.length">
         <article v-for="user in users" :key="user.id" class="user-list-item" @click="openAuthor(user.id)">
-          <img :src="user.avatarUrl ?? ''" alt="头像" />
-          <div class="copy"><strong>{{ user.nickname }}</strong><small>映流号: {{ user.id }}</small></div>
+          <AvatarImage :src="user.avatarUrl" alt="头像" />
+          <div class="copy"><strong>{{ user.nickname }}</strong><small>videoshare号: {{ user.id }}</small></div>
           <button
+            :disabled="pendingInteractions.has(`follow:${user.id}`)"
             :class="{ primary: !user.following, followed: user.following }"
             @click.stop="toggleFollow(user)"
           >{{ user.following ? '已关注' : '+ 关注' }}</button>

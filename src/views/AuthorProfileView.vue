@@ -1,28 +1,42 @@
 <script setup lang="ts">
+import AnimatedCount from '../components/AnimatedCount.vue';
 /**
  * 作者主页（M07）：资料、关注状态、统计、公开视频网格。
  */
-import { onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, ref } from 'vue';
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router';
 import { showToast } from 'vant';
-import { getAuthorProfile, getAuthorVideos, setFollow } from '../api';
+import { getAuthorProfile, setFollow } from '../api';
 import { isAuthenticated } from '../api/http';
-import type { FeedItem } from '../api/types';
 import { formatCount } from '../utils/format';
 import { EVENT_NAMES, track } from '../analytics';
+import AvatarImage from '../components/AvatarImage.vue';
 import ReportSheet from '../components/ReportSheet.vue';
+import ContentCollection from '../components/ContentCollection.vue';
+import { useAuthStore } from '../stores/auth';
+import { pendingInteractions } from '../utils/pendingInteractions';
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
 
 const userId = ref(String(route.params.userId ?? ''));
 const profile = ref<Awaited<ReturnType<typeof getAuthorProfile>> | null>(null);
-const videos = ref<FeedItem[]>([]);
-const cursor = ref<string | null>(null);
-const loading = ref(false);
-const finished = ref(false);
-const tab = ref<'works' | 'private' | 'likes'>('works');
+const tab = ref<'works' | 'likes'>('works');
+const scroll = ref<HTMLElement>();
+const active = ref(true);
+const positions = { works: 0, likes: 0 };
+async function selectTab(key: typeof tab.value) {
+  positions[tab.value] = scroll.value?.scrollTop ?? 0;
+  tab.value = key;
+  await nextTick();
+  if (scroll.value) scroll.value.scrollTop = positions[key];
+}
+onBeforeRouteLeave(() => { positions[tab.value] = scroll.value?.scrollTop ?? 0; });
+onDeactivated(() => { active.value = false; });
+onActivated(async () => { active.value = true; if (profile.value) void loadProfile(); await nextTick(); if (scroll.value) scroll.value.scrollTop = positions[tab.value]; });
 const reportOpen = ref(false);
+const isOwnProfile = computed(() => isAuthenticated() && auth.user?.id === profile.value?.id);
 
 async function loadProfile() {
   try {
@@ -33,40 +47,26 @@ async function loadProfile() {
   }
 }
 
-async function loadVideos() {
-  if (loading.value || finished.value) return;
-  loading.value = true;
-  try {
-    const page = await getAuthorVideos(userId.value, cursor.value, 9);
-    videos.value.push(...page.items);
-    cursor.value = page.nextCursor;
-    finished.value = page.nextCursor == null;
-  } catch {
-    showToast('作品加载失败');
-  } finally {
-    loading.value = false;
-  }
-}
-
 async function toggleFollow() {
+  if (isOwnProfile.value) return;
   if (!isAuthenticated()) {
     router.push({ name: 'login', query: { redirect: route.fullPath } });
     return;
   }
   if (!profile.value) return;
+  const key = `follow:${userId.value}`;
+  if (pendingInteractions.has(key)) return;
+  pendingInteractions.add(key);
   const target = !profile.value.following;
   const before = profile.value.following;
   profile.value = { ...profile.value, following: target };
   try {
-    await setFollow(userId.value, target);
+    const result = await setFollow(userId.value, target);
+    profile.value = { ...profile.value, following: result.active, followerCount: result.count };
   } catch {
     profile.value = { ...profile.value!, following: before };
     showToast('操作失败，已恢复');
-  }
-}
-
-function openVideo(videoId: string) {
-  router.push({ name: 'feed', query: { video: videoId } });
+  } finally { pendingInteractions.delete(key); }
 }
 
 function reportUser() {
@@ -77,21 +77,7 @@ function reportUser() {
   reportOpen.value = true;
 }
 
-watch(() => route.params.userId, (value) => {
-  if (typeof value === 'string' && value !== userId.value) {
-    userId.value = value;
-    videos.value = [];
-    cursor.value = null;
-    finished.value = false;
-    loadProfile();
-    loadVideos();
-  }
-});
-
-onMounted(() => {
-  loadProfile();
-  loadVideos();
-});
+onMounted(loadProfile);
 </script>
 
 <template>
@@ -101,47 +87,34 @@ onMounted(() => {
       <strong>{{ profile?.nickname ?? '' }}</strong>
       <button aria-label="更多" @click="reportUser"><van-icon name="ellipsis" /></button>
     </header>
-    <div class="profile-scroll" @scroll.passive="() => {}">
+    <div ref="scroll" class="profile-scroll">
       <template v-if="profile">
         <section class="profile-bio">
           <div class="profile-main-row">
-            <div class="profile-avatar"><img :src="profile.avatarUrl ?? ''" alt="头像" /></div>
+            <div class="profile-avatar"><AvatarImage :src="profile.avatarUrl" alt="头像" /></div>
             <div class="profile-actions">
-              <button :class="{ primary: !profile.following, followed: profile.following }" @click="toggleFollow">
-                {{ profile.following ? '已关注' : '关注' }}
+              <button v-if="!isOwnProfile" :disabled="pendingInteractions.has(`follow:${userId}`)" :class="{ primary: !profile.following, followed: profile.following }" @click="toggleFollow">
+                {{ pendingInteractions.has(`follow:${userId}`) ? '处理中…' : profile.following ? '已关注' : '关注' }}
               </button>
-              <button>私信</button>
+              <button v-if="isOwnProfile" @click="router.push({ name: 'my-content' })">管理作品</button>
             </div>
           </div>
           <h1>{{ profile.nickname }}</h1>
-          <small>映流号: {{ profile.id }}</small>
+          <small>videoshare号: {{ profile.id }}</small>
           <div class="profile-stats">
-            <b>{{ formatCount(profile.stats.followingCount) }} <span>关注</span></b>
-            <b>{{ formatCount(profile.stats.followerCount) }} <span>粉丝</span></b>
-            <b>{{ formatCount(profile.stats.likeReceivedCount) }} <span>获赞</span></b>
+            <b><AnimatedCount :value="profile.followingCount" /> <span>关注</span></b>
+            <b><AnimatedCount :value="profile.followerCount" /> <span>粉丝</span></b>
+            <b><AnimatedCount :value="profile.likeReceivedCount" /> <span>获赞</span></b>
           </div>
           <p>{{ profile.bio || '这个人很懒，什么都没有写' }}</p>
         </section>
 
-        <nav class="profile-tabs">
-          <button :class="{ active: tab === 'works' }" @click="tab = 'works'">作品 {{ videos.length }}</button>
-          <button :class="{ active: tab === 'private' }" @click="tab = 'private'">私密</button>
-          <button :class="{ active: tab === 'likes' }" @click="tab = 'likes'">喜欢</button>
+        <nav class="profile-tabs" role="tablist" aria-label="作者内容">
+          <button role="tab" :aria-selected="tab === 'works'" :class="{ active: tab === 'works' }" @click="selectTab('works')">作品 {{ profile.worksCount }}</button>
+          <button role="tab" :aria-selected="tab === 'likes'" :class="{ active: tab === 'likes' }" @click="selectTab('likes')">喜欢</button>
         </nav>
-
-        <div v-if="tab === 'works'" class="works-grid">
-          <article v-for="video in videos" :key="video.id" @click="openVideo(video.id)">
-            <img :src="video.cover?.coverUrl ?? ''" alt="作品缩略图" />
-            <span><van-icon name="play-circle-o" /> {{ formatCount(video.stats.playCount) }}</span>
-          </article>
-        </div>
-        <div v-else class="empty-state">
-          <van-icon :name="tab === 'private' ? 'closed-eye' : 'like-o'" />
-          <p>{{ tab === 'private' ? '暂无私密作品' : '喜欢的作品将在这里展示' }}</p>
-        </div>
-
-        <div class="load-more" v-if="loading">加载中...</div>
-        <div class="load-more" v-else-if="finished && videos.length > 0">没有更多了</div>
+        <div v-show="tab === 'works'" role="tabpanel"><ContentCollection kind="author-works" :user-id="userId" :active="active && tab === 'works'" /></div>
+        <div v-show="tab === 'likes'" role="tabpanel"><ContentCollection kind="author-likes" :user-id="userId" :active="active && tab === 'likes'" /></div>
       </template>
       <div v-else class="empty-state"><van-loading size="28" /></div>
     </div>
@@ -151,4 +124,8 @@ onMounted(() => {
 
 <style scoped>
 .light-page { color: var(--text-strong); background: #fff; }
+.profile-tabs { grid-template-columns: repeat(2, 1fr); }
+.profile-tabs button.active { color: #4268f6; }
+.profile-tabs button.active::after { background: #4268f6; }
+@media (min-width: 768px) { .profile-scroll { left: 50%; transform: translateX(-50%); max-width: 900px; } }
 </style>

@@ -87,4 +87,41 @@ describe('http client', () => {
     expect(createIdempotencyKey()).toBeTruthy();
     expect(createIdempotencyKey()).not.toBe(createIdempotencyKey());
   });
+
+  it('reports multipart progress and keeps authentication and response parsing', async () => {
+    tokenStore.set('upload-token');
+    const xhr = { open: vi.fn(), setRequestHeader: vi.fn(), send: vi.fn(), withCredentials: false,
+      upload: {} as { onprogress: (event: Partial<ProgressEvent>) => void },
+      status: 200, responseText: JSON.stringify({ code: 'OK', data: { id: '123' } }),
+      onload: () => {}, onloadend: () => {} };
+    vi.stubGlobal('XMLHttpRequest', vi.fn(function () { return xhr; }));
+    const progress = vi.fn();
+    const body = new FormData(); body.append('file', new File(['video'], 'video.mp4'));
+    const result = request('/app/content', { method: 'POST', body, onUploadProgress: progress });
+    expect(xhr.open).toHaveBeenCalledWith('POST', expect.stringContaining('/api/v1/app/content'));
+    expect(xhr.setRequestHeader).toHaveBeenCalledWith('Authorization', 'Bearer upload-token');
+    expect(xhr.setRequestHeader).not.toHaveBeenCalledWith('Content-Type', expect.anything());
+    expect(xhr.withCredentials).toBe(true);
+    expect(xhr.send).toHaveBeenCalledWith(body);
+    xhr.upload.onprogress({ lengthComputable: false, loaded: 1, total: 0 });
+    expect(progress).not.toHaveBeenCalled();
+    xhr.upload.onprogress({ lengthComputable: true, loaded: 45, total: 100 });
+    expect(progress).toHaveBeenCalledWith(45);
+    xhr.onload(); xhr.onloadend();
+    await expect(result).resolves.toEqual({ id: '123' });
+  });
+
+  it.each([
+    [401, '{"code":"TOKEN_EXPIRED","message":"登录已失效"}', 'TOKEN_EXPIRED'],
+    [502, '<html>gateway</html>', 'HTTP_ERROR'],
+  ])('handles upload HTTP %s through the same error contract', async (status, responseText, code) => {
+    const xhr = { open: vi.fn(), setRequestHeader: vi.fn(), send: vi.fn(), upload: {}, status, responseText, onload: () => {} };
+    vi.stubGlobal('XMLHttpRequest', vi.fn(function () { return xhr; }));
+    const handler = vi.fn(); setAuthRequiredHandler(handler); tokenStore.set('token');
+    const result = request('/app/content', { method: 'POST', body: new FormData(), onUploadProgress: vi.fn() });
+    const assertion = expect(result).rejects.toMatchObject({ code, httpStatus: status });
+    xhr.onload();
+    await assertion;
+    expect(handler).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+  });
 });

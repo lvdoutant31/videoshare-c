@@ -1,10 +1,10 @@
 /**
- * 登录态 Pinia store：token、当前用户、企业微信登录与退出。
+ * 登录态 Pinia store：token、当前用户、密码登录，以及为后续启用保留的企微回调能力。
  */
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import { isAuthenticated, tokenStore } from '../api/http';
-import { getMe, logout as apiLogout, wecomLogin as apiWecomLogin } from '../api';
+import { getMe, logout as apiLogout, passwordLogin as apiPasswordLogin, phoneLogin as apiPhoneLogin, updateMe, wecomLogin as apiWecomLogin } from '../api';
 import type { AppUser } from '../api/types';
 
 export const useAuthStore = defineStore('auth', () => {
@@ -14,11 +14,23 @@ export const useAuthStore = defineStore('auth', () => {
 
   const loggedIn = computed(() => isAuthenticated() && user.value != null);
 
-  /** 企微 OAuth 回调登录（用 code + state 换取本平台会话） */
-  async function loginWithWecom(code: string, state: string): Promise<void> {
-    const result = await apiWecomLogin(code, state);
+  function acceptLogin(result: { accessToken: string; user: AppUser }): void {
     tokenStore.set(result.accessToken);
     user.value = result.user;
+  }
+
+  async function login(phone: string, password: string): Promise<void> {
+    acceptLogin(await apiPasswordLogin(phone, password));
+  }
+
+  /** 手机号验证码登录；新手机号由服务端自动注册。 */
+  async function loginWithPhoneCode(phone: string, code: string, agreementVersion: string): Promise<void> {
+    acceptLogin(await apiPhoneLogin(phone, code, agreementVersion));
+  }
+
+  /** 企微 OAuth 回调登录（用 code + state 换取本平台会话） */
+  async function loginWithWecom(code: string, state: string): Promise<void> {
+    acceptLogin(await apiWecomLogin(code, state));
   }
 
   /** 启动时恢复会话：有 token 则拉取 /app/me */
@@ -39,6 +51,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /** 主动刷新当前用户及统计数据。 */
+  async function refreshProfile(): Promise<void> {
+    if (!isAuthenticated()) return;
+    user.value = await getMe();
+  }
+
   /** 退出登录 */
   async function logout(): Promise<void> {
     try {
@@ -49,18 +67,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  /** 更新当前用户资料（乐观更新，失败回滚） */
+  /** 调用资料接口，并以服务端响应作为唯一权威状态。 */
   async function patchProfile(patch: Partial<Pick<AppUser, 'nickname' | 'bio' | 'avatarUrl'>>): Promise<void> {
     if (!user.value) return;
-    const previous = user.value;
-    user.value = { ...previous, ...patch };
-    try {
-      user.value = await getMe();
-    } catch {
-      user.value = previous;
-      throw new Error('资料更新失败，已恢复原状');
-    }
+    user.value = await updateMe(patch);
   }
 
-  return { user, loaded, loading, loggedIn, loginWithWecom, restore, logout, patchProfile };
+  return { user, loaded, loading, loggedIn, login, loginWithPhoneCode, loginWithWecom, restore, refreshProfile, logout, patchProfile };
 });
